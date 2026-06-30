@@ -1,0 +1,496 @@
+-- ==========================================
+-- KICKOFF: ESPORTS TOURNAMENT PLATFORM
+-- COMPLETE SUPABASE SQL SCHEMA
+-- ==========================================
+
+-- Enable UUID extension
+create extension if not exists "uuid-ossp";
+
+-- Clean existing tables (if any)
+-- drop table if exists public.activity_logs cascade;
+-- drop table if exists public.settings cascade;
+-- drop table if exists public.player_statistics cascade;
+-- drop table if exists public.leaderboards cascade;
+-- drop table if exists public.achievements cascade;
+-- drop table if exists public.notifications cascade;
+-- drop table if exists public.match_results cascade;
+-- drop table if exists public.matches cascade;
+-- drop table if exists public.teams cascade;
+-- drop table if exists public.tournament_players cascade;
+-- drop table if exists public.tournaments cascade;
+-- drop table if exists public.games cascade;
+-- drop table if exists public.profiles cascade;
+
+-- ==========================================
+-- 1. PROFILES TABLE
+-- ==========================================
+create table public.profiles (
+    id uuid references auth.users on delete cascade primary key,
+    username text unique not null,
+    email text not null,
+    avatar_url text,
+    role text not null default 'player' check (role in ('admin', 'organizer', 'player')),
+    bio text,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- 2. GAMES TABLE
+-- ==========================================
+create table public.games (
+    id uuid default gen_random_uuid() primary key,
+    name text not null,
+    slug text unique not null,
+    icon text,
+    cover_image text,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- 3. TOURNAMENTS TABLE
+-- ==========================================
+create table public.tournaments (
+    id uuid default gen_random_uuid() primary key,
+    title text not null,
+    description text,
+    game_id uuid references public.games(id) on delete restrict not null,
+    organizer_id uuid references public.profiles(id) on delete cascade not null,
+    banner_url text,
+    max_players integer not null default 16,
+    status text not null default 'draft' check (status in ('draft', 'registration', 'active', 'completed')),
+    start_time timestamp with time zone not null,
+    format text not null default 'single_elimination' check (format in ('single_elimination', 'double_elimination', 'round_robin')),
+    prize_pool text,
+    rules text,
+    winner_id uuid references public.profiles(id) on delete set null,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- 4. TOURNAMENT PLAYERS (REGISTRATIONS)
+-- ==========================================
+create table public.tournament_players (
+    id uuid default gen_random_uuid() primary key,
+    tournament_id uuid references public.tournaments(id) on delete cascade not null,
+    player_id uuid references public.profiles(id) on delete cascade not null,
+    status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+    seed_no integer,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    unique(tournament_id, player_id)
+);
+
+-- ==========================================
+-- 5. TEAMS (Optional for team tournaments)
+-- ==========================================
+create table public.teams (
+    id uuid default gen_random_uuid() primary key,
+    name text not null,
+    logo_url text,
+    captain_id uuid references public.profiles(id) on delete set null,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- 6. MATCHES TABLE
+-- ==========================================
+create table public.matches (
+    id uuid default gen_random_uuid() primary key,
+    tournament_id uuid references public.tournaments(id) on delete cascade not null,
+    round_no integer not null,
+    match_no integer not null,
+    player1_id uuid references public.profiles(id) on delete set null,
+    player2_id uuid references public.profiles(id) on delete set null,
+    player1_score integer default 0,
+    player2_score integer default 0,
+    winner_id uuid references public.profiles(id) on delete set null,
+    status text not null default 'scheduled' check (status in ('scheduled', 'waiting', 'playing', 'disputed', 'completed')),
+    next_match_id uuid references public.matches(id) on delete set null,
+    scheduled_time timestamp with time zone,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- 7. MATCH RESULTS (SUBMISSIONS)
+-- ==========================================
+create table public.match_results (
+    id uuid default gen_random_uuid() primary key,
+    match_id uuid references public.matches(id) on delete cascade not null,
+    submitted_by uuid references public.profiles(id) on delete cascade not null,
+    player1_score integer not null,
+    player2_score integer not null,
+    proof_url text,
+    status text not null default 'pending' check (status in ('pending', 'approved', 'disputed')),
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    unique(match_id, submitted_by)
+);
+
+-- ==========================================
+-- 8. NOTIFICATIONS TABLE
+-- ==========================================
+create table public.notifications (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.profiles(id) on delete cascade not null,
+    title text not null,
+    content text not null,
+    link text,
+    is_read boolean not null default false,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- 9. ACHIEVEMENTS TABLE
+-- ==========================================
+create table public.achievements (
+    id uuid default gen_random_uuid() primary key,
+    name text not null,
+    description text not null,
+    badge_icon text not null,
+    xp_reward integer not null default 100,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- User Achievements mapping
+create table public.user_achievements (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.profiles(id) on delete cascade not null,
+    achievement_id uuid references public.achievements(id) on delete cascade not null,
+    earned_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    unique(user_id, achievement_id)
+);
+
+-- ==========================================
+-- 10. LEADERBOARDS TABLE
+-- ==========================================
+create table public.leaderboards (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.profiles(id) on delete cascade not null,
+    game_id uuid references public.games(id) on delete cascade not null,
+    rank_points integer not null default 1000,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    unique(user_id, game_id)
+);
+
+-- ==========================================
+-- 11. PLAYER STATISTICS
+-- ==========================================
+create table public.player_statistics (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.profiles(id) on delete cascade not null,
+    game_id uuid references public.games(id) on delete cascade not null,
+    matches_played integer not null default 0,
+    matches_won integer not null default 0,
+    matches_lost integer not null default 0,
+    tournaments_played integer not null default 0,
+    tournaments_won integer not null default 0,
+    win_rate numeric(5,2) default 0.00,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    unique(user_id, game_id)
+);
+
+-- ==========================================
+-- 12. ACTIVITY LOGS
+-- ==========================================
+create table public.activity_logs (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.profiles(id) on delete cascade not null,
+    action_type text not null,
+    description text not null,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- 13. SETTINGS
+-- ==========================================
+create table public.settings (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.profiles(id) on delete cascade unique not null,
+    push_notifications boolean not null default true,
+    email_notifications boolean not null default true,
+    public_profile boolean not null default true,
+    dark_mode boolean not null default true,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- AUTOMATIC PROFILE CREATION ON SIGNUP
+-- ==========================================
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, username, email, avatar_url, role)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1)),
+    new.email,
+    new.raw_user_meta_data->>'avatar_url',
+    coalesce(new.raw_user_meta_data->>'role', 'player')
+  );
+  
+  -- Create default player statistics for the first game if exists
+  -- and default settings
+  insert into public.settings (user_id) values (new.id);
+  
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- ==========================================
+-- AUTOMATIC STATS CALCULATION
+-- ==========================================
+create or replace function public.calculate_win_rate()
+returns trigger as $$
+begin
+    if (new.matches_played > 0) then
+        new.win_rate := (new.matches_won::numeric / new.matches_played::numeric) * 100;
+    else
+        new.win_rate := 0.00;
+    end if;
+    return new;
+end;
+$$ language plpgsql;
+
+create trigger update_win_rate
+    before insert or update on public.player_statistics
+    for each row execute procedure public.calculate_win_rate();
+
+-- ==========================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- ==========================================
+
+-- Enable RLS
+alter table public.profiles enable row level security;
+alter table public.games enable row level security;
+alter table public.tournaments enable row level security;
+alter table public.tournament_players enable row level security;
+alter table public.teams enable row level security;
+alter table public.matches enable row level security;
+alter table public.match_results enable row level security;
+alter table public.notifications enable row level security;
+alter table public.achievements enable row level security;
+alter table public.user_achievements enable row level security;
+alter table public.leaderboards enable row level security;
+alter table public.player_statistics enable row level security;
+alter table public.activity_logs enable row level security;
+alter table public.settings enable row level security;
+
+-- PROFILES POLICIES
+create policy "Allow public read on profiles" on public.profiles
+    for select using (true);
+
+create policy "Allow owners to update their own profile" on public.profiles
+    for update using (auth.uid() = id);
+
+create policy "Allow admins to delete profiles" on public.profiles
+    for delete using (
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role = 'admin'
+        )
+    );
+
+-- GAMES POLICIES
+create policy "Allow public read on games" on public.games
+    for select using (true);
+
+create policy "Allow admins and organizers to manage games" on public.games
+    for all using (
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role in ('admin', 'organizer')
+        )
+    );
+
+-- TOURNAMENTS POLICIES
+create policy "Allow public read on tournaments" on public.tournaments
+    for select using (true);
+
+create policy "Allow organizers and admins to manage tournaments" on public.tournaments
+    for all using (
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role in ('admin', 'organizer')
+        )
+    );
+
+-- TOURNAMENT PLAYERS POLICIES
+create policy "Allow public read on tournament registrations" on public.tournament_players
+    for select using (true);
+
+create policy "Allow players to register themselves" on public.tournament_players
+    for insert with check (auth.uid() = player_id);
+
+create policy "Allow players to cancel registration" on public.tournament_players
+    for delete using (auth.uid() = player_id);
+
+create policy "Allow organizers/admins to manage registrations" on public.tournament_players
+    for update using (
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role in ('admin', 'organizer')
+        )
+    );
+
+-- TEAMS POLICIES
+create policy "Allow public read on teams" on public.teams
+    for select using (true);
+
+create policy "Allow captains/organizers to manage teams" on public.teams
+    for all using (
+        auth.uid() = captain_id or 
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role in ('admin', 'organizer')
+        )
+    );
+
+-- MATCHES POLICIES
+create policy "Allow public read on matches" on public.matches
+    for select using (true);
+
+create policy "Allow organizers/admins to manage matches" on public.matches
+    for all using (
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role in ('admin', 'organizer')
+        )
+    );
+
+-- MATCH RESULTS POLICIES
+create policy "Allow public read on match results" on public.match_results
+    for select using (true);
+
+create policy "Allow participants of the match to submit result" on public.match_results
+    for insert with check (
+        auth.uid() = submitted_by and
+        exists (
+            select 1 from public.matches m
+            where m.id = match_id and (m.player1_id = auth.uid() or m.player2_id = auth.uid())
+        )
+    );
+
+create policy "Allow organizers/admins to manage match results" on public.match_results
+    for all using (
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role in ('admin', 'organizer')
+        )
+    );
+
+-- NOTIFICATIONS POLICIES
+create policy "Allow users to read their own notifications" on public.notifications
+    for select using (auth.uid() = user_id);
+
+create policy "Allow users to update their own notifications" on public.notifications
+    for update using (auth.uid() = user_id);
+
+-- ACHIEVEMENTS POLICIES
+create policy "Allow public read on achievements" on public.achievements
+    for select using (true);
+
+create policy "Allow public read on user achievements" on public.user_achievements
+    for select using (true);
+
+-- LEADERBOARDS POLICIES
+create policy "Allow public read on leaderboards" on public.leaderboards
+    for select using (true);
+
+-- PLAYER STATISTICS POLICIES
+create policy "Allow public read on player stats" on public.player_statistics
+    for select using (true);
+
+-- ACTIVITY LOGS POLICIES
+create policy "Allow users to view their own activity logs" on public.activity_logs
+    for select using (
+        auth.uid() = user_id or
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role = 'admin'
+        )
+    );
+
+create policy "Allow system to insert activity logs" on public.activity_logs
+    for insert with check (true);
+
+-- SETTINGS POLICIES
+create policy "Allow users to view and edit their own settings" on public.settings
+    for all using (auth.uid() = user_id);
+
+-- ==========================================
+-- STORAGE BUCKETS SETUP
+-- ==========================================
+-- Supabase Storage is managed in the 'storage' schema. 
+-- The following SQL creates the buckets and policies if they do not exist.
+-- To execute this, make sure storage extensions are enabled.
+
+insert into storage.buckets (id, name, public) 
+values 
+  ('avatars', 'avatars', true),
+  ('tournament-banners', 'tournament-banners', true),
+  ('proof-screenshots', 'proof-screenshots', true)
+on conflict (id) do nothing;
+
+-- Storage policies for avatars
+create policy "Public Access to Avatars" on storage.objects 
+    for select using (bucket_id = 'avatars');
+
+create policy "Authenticated Users can upload avatars" on storage.objects 
+    for insert with check (bucket_id = 'avatars' and auth.role() = 'authenticated');
+
+create policy "Users can delete their own avatars" on storage.objects 
+    for delete using (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+
+-- Storage policies for tournament-banners
+create policy "Public Access to Banners" on storage.objects 
+    for select using (bucket_id = 'tournament-banners');
+
+create policy "Organizers can upload banners" on storage.objects 
+    for insert with check (
+        bucket_id = 'tournament-banners' and 
+        exists (
+            select 1 from public.profiles 
+            where id = auth.uid() and role in ('organizer', 'admin')
+        )
+    );
+
+-- Storage policies for proof-screenshots
+create policy "Public Access to Proofs" on storage.objects 
+    for select using (bucket_id = 'proof-screenshots');
+
+create policy "Players can upload proof" on storage.objects 
+    for insert with check (bucket_id = 'proof-screenshots' and auth.role() = 'authenticated');
+
+-- ==========================================
+-- 14. CHATS TABLE
+-- ==========================================
+create table public.chats (
+    id uuid default gen_random_uuid() primary key,
+    tournament_id text not null, -- Can be 'global' or a tournament UUID
+    user_id uuid references public.profiles(id) on delete cascade not null,
+    username text not null,
+    avatar_url text,
+    content text not null,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.chats enable row level security;
+
+create policy "Allow public read on chats" on public.chats
+    for select using (true);
+
+create policy "Allow authenticated users to send chat messages" on public.chats
+    for insert with check (auth.role() = 'authenticated' and auth.uid() = user_id);
+
