@@ -92,3 +92,4 @@ If your Supabase SQL permissions didn't automatically instantiate the storage bu
 - **Notifications**: Users can only see and mark read their own notifications.
 - **Settings**: Only owners can read and edit settings.
 "# footy" 
+"# footy" 
