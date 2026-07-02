@@ -91,3 +91,4 @@ If your Supabase SQL permissions didn't automatically instantiate the storage bu
 - **Match Results**: Publicly readable. Match participants can submit scores. Admins/Organizers can approve them.
 - **Notifications**: Users can only see and mark read their own notifications.
 - **Settings**: Only owners can read and edit settings.
+"# footy" 
