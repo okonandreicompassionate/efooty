@@ -1,22 +1,38 @@
-import { useState, useEffect } from 'react';
-import { Trophy, Medal, Search, Star, Gamepad2, ArrowUp, Zap } from 'lucide-react';
-import { Leaderboard, Game } from '../types';
+import { useState, useEffect, useMemo } from 'react';
+import { Trophy, Medal, Search, Star, Gamepad2, ArrowUp, Zap, Globe2 } from 'lucide-react';
+import { Leaderboard, Game, Tournament } from '../types';
 import { db } from '../services/db';
 
 interface LeaderboardViewProps {
   games: Game[];
+  tournaments: Tournament[];
 }
 
-export default function LeaderboardView({ games }: LeaderboardViewProps) {
-  const [selectedGame, setSelectedGame] = useState<string>(games[0]?.id || 'g1');
+export default function LeaderboardView({ games, tournaments }: LeaderboardViewProps) {
+  const [selectedGame, setSelectedGame] = useState<string>('overall');
+  const [selectedTournamentId, setSelectedTournamentId] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [leaders, setLeaders] = useState<Leaderboard[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredLeaders = useMemo(() => leaders.filter((entry) => {
+    const name = entry.username?.toLowerCase() || 'anonymous player';
+    return name.includes(normalizedSearch) || entry.user_id.toLowerCase().includes(normalizedSearch);
+  }), [leaders, normalizedSearch]);
 
   useEffect(() => {
     async function loadLeaders() {
       setLoading(true);
       try {
-        const data = await db.getLeaderboard(selectedGame);
+        let data: Leaderboard[] = [];
+        if (selectedTournamentId !== 'all') {
+          data = await db.getTournamentLeaderboard(selectedTournamentId);
+        } else if (selectedGame === 'overall') {
+          data = await db.getOverallLeaderboard();
+        } else {
+          data = await db.getLeaderboard(selectedGame);
+        }
         setLeaders(data);
       } catch (err) {
         console.error('Error loading leaderboard:', err);
@@ -25,17 +41,33 @@ export default function LeaderboardView({ games }: LeaderboardViewProps) {
       }
     }
     loadLeaders();
-  }, [selectedGame]);
+  }, [selectedGame, selectedTournamentId]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300 text-left">
-      <div>
-        <h1 className="text-2xl font-extrabold text-white tracking-tight">Esports Leaderboards</h1>
-        <p className="text-sm text-gray-400">Track regional rankings, earn points by winning matches, and stand out.</p>
+      <div className="rounded-[28px] border border-white/10 bg-zinc-950/60 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-cyan-400">Competitive pulse</p>
+            <h1 className="text-2xl font-extrabold tracking-tight text-white">Esports Leaderboards</h1>
+          </div>
+          <p className="max-w-xl text-sm text-zinc-400">Track regional rankings, claim points from verified wins, and see who’s on the rise.</p>
+        </div>
       </div>
 
       {/* Game Selector Row */}
       <div className="flex gap-2 overflow-x-auto pb-2 border-b border-white/5">
+        <button
+          onClick={() => setSelectedGame('overall')}
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl border transition-all cursor-pointer truncate ${
+            selectedGame === 'overall'
+              ? 'bg-cyan-500 text-black border-cyan-500 shadow-lg shadow-cyan-500/10'
+              : 'bg-zinc-900/40 text-zinc-400 border-white/5 hover:text-white hover:bg-zinc-850/40'
+          }`}
+        >
+          <Globe2 className="h-3.5 w-3.5" />
+          Overall
+        </button>
         {games.map((g) => (
           <button
             key={g.id}
@@ -52,8 +84,36 @@ export default function LeaderboardView({ games }: LeaderboardViewProps) {
         ))}
       </div>
 
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500">Leaderboard</p>
+          <p className="text-[11px] text-zinc-400">Search players and compare ranking points in your live esports leaderboard.</p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 w-full sm:w-auto">
+          <div className="relative w-full sm:w-72">
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search competitors"
+              className="w-full bg-zinc-900 border border-white/10 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50"
+            />
+          </div>
+          <select
+            value={selectedTournamentId}
+            onChange={(e) => setSelectedTournamentId(e.target.value)}
+            className="w-full sm:w-72 bg-zinc-900 border border-white/10 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50"
+          >
+            <option value="all">All tournaments</option>
+            {tournaments.map((t) => (
+              <option key={t.id} value={t.id}>{t.title}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {/* Leaderboard Table */}
-      <div className="rounded-2xl border border-white/5 bg-zinc-950/40 overflow-hidden shadow-xl backdrop-blur-sm">
+      <div className="rounded-[28px] border border-white/10 bg-zinc-950/60 overflow-hidden shadow-[0_25px_80px_rgba(0,0,0,0.3)] backdrop-blur-xl">
         <div className="grid grid-cols-12 px-6 py-4 border-b border-white/5 bg-zinc-900/50 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
           <div className="col-span-2 text-center">Rank</div>
           <div className="col-span-6">Competitor</div>
@@ -72,7 +132,7 @@ export default function LeaderboardView({ games }: LeaderboardViewProps) {
           </div>
         ) : (
           <div className="divide-y divide-white/5">
-            {leaders.map((entry, index) => {
+            {filteredLeaders.map((entry, index) => {
               const rank = index + 1;
               const isTop3 = rank <= 3;
 
@@ -130,7 +190,7 @@ export default function LeaderboardView({ games }: LeaderboardViewProps) {
 
       {/* Point details ticker */}
       <div className="rounded-xl border border-white/5 p-4 bg-zinc-950/20 backdrop-blur-sm flex items-start gap-3">
-        <Zap className="h-5 w-5 text-cyan-400 flex-shrink-0 mt-0.5" />
+        <Zap className="h-5 w-5 text-cyan-400 shrink-0 mt-0.5" />
         <div className="space-y-1">
           <h4 className="text-xs font-bold text-white">How Rank Points (PTS) Work</h4>
           <p className="text-xs text-zinc-400 leading-relaxed">

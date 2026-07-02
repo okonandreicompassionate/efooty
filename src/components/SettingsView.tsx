@@ -17,6 +17,9 @@ export default function SettingsView({ currentUser, onRefreshProfile }: Settings
   const [pushNotif, setPushNotif] = useState(true);
   const [emailNotif, setEmailNotif] = useState(true);
   const [publicProfile, setPublicProfile] = useState(true);
+  const [showEmail, setShowEmail] = useState(false);
+  const [allowDms, setAllowDms] = useState(true);
+  const [anonymousMode, setAnonymousMode] = useState(false);
   
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -29,6 +32,9 @@ export default function SettingsView({ currentUser, onRefreshProfile }: Settings
         setPushNotif(setts.push_notifications);
         setEmailNotif(setts.email_notifications);
         setPublicProfile(setts.public_profile);
+        setShowEmail(Boolean(setts.show_email));
+        setAllowDms(setts.allow_dms !== false);
+        setAnonymousMode(Boolean(setts.anonymous_mode));
       } catch (err) {
         console.error('Error fetching settings:', err);
       }
@@ -42,8 +48,14 @@ export default function SettingsView({ currentUser, onRefreshProfile }: Settings
     setSuccess(false);
     try {
       // Save profile update
+      const normalizedUsername = username.trim().replace(/\s+/g, '_').toLowerCase();
+      if (normalizedUsername.length < 3) {
+        alert('Username must be at least 3 characters.');
+        return;
+      }
+
       await db.updateUserProfile(currentUser.id, {
-        username,
+        username: normalizedUsername,
         bio
       });
 
@@ -51,7 +63,10 @@ export default function SettingsView({ currentUser, onRefreshProfile }: Settings
       await db.updateSettings(currentUser.id, {
         push_notifications: pushNotif,
         email_notifications: emailNotif,
-        public_profile: publicProfile
+        public_profile: publicProfile,
+        show_email: showEmail,
+        allow_dms: allowDms,
+        anonymous_mode: anonymousMode
       });
 
       onRefreshProfile();
@@ -137,7 +152,10 @@ export default function SettingsView({ currentUser, onRefreshProfile }: Settings
             {[
               { id: 'push', title: 'Push Notifications', desc: 'Alert me instantly in client browser when my tournament bracket has generated.', checked: pushNotif, setter: setPushNotif },
               { id: 'email', title: 'Email Notifications', desc: 'Send daily digests of match scorecard results and leaderboard point changes.', checked: emailNotif, setter: setEmailNotif },
-              { id: 'public', title: 'Public Gamer Profile', desc: 'Allow other registered tournament participants to view my historical statistics and achievements.', checked: publicProfile, setter: setPublicProfile }
+              { id: 'public', title: 'Public Gamer Profile', desc: 'Allow other registered tournament participants to view my historical statistics and achievements.', checked: publicProfile, setter: setPublicProfile },
+              { id: 'show-email', title: 'Show Email', desc: 'Let other players see your email on player cards and tournament rosters.', checked: showEmail, setter: setShowEmail },
+              { id: 'allow-dms', title: 'Allow Direct Messages', desc: 'Let players search for you and start private conversations.', checked: allowDms, setter: setAllowDms },
+              { id: 'anonymous', title: 'Anonymous Mode', desc: 'Show a privacy-first identity where supported by player lists and public surfaces.', checked: anonymousMode, setter: setAnonymousMode }
             ].map(pref => (
               <div key={pref.id} className="flex items-start justify-between gap-4">
                 <div className="space-y-1 text-left max-w-md">

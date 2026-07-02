@@ -1,1138 +1,1749 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
-import { 
-  Profile, Game, Tournament, TournamentPlayer, Match, 
-  MatchResult, Notification, Achievement, Leaderboard, 
-  PlayerStatistics, ActivityLog, Settings, UserRole,
-  TournamentStatus, PlayerRegistrationStatus, UserAchievement,
-  ChatMessage
+import {
+  Profile,
+  Game,
+  Tournament,
+  TournamentPlayer,
+  Match,
+  MatchResult,
+  Notification,
+  Achievement,
+  Leaderboard,
+  PlayerStatistics,
+  ActivityLog,
+  Settings,
+  UserRole,
+  TournamentStatus,
+  PlayerRegistrationStatus,
+  UserAchievement,
+  ChatMessage,
+  FriendChallenge,
+  Friendship,
+  TournamentRosterCount
 } from '../types';
 
-// ==========================================
-// MOCK SEED DATA FOR OFFLINE SIMULATION
-// ==========================================
-
-const MOCK_GAMES: Game[] = [
-  { id: 'g1', name: 'eFootball 2026', slug: 'efootball', icon: 'Gamepad2', cover_image: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800&auto=format&fit=crop&q=60', created_at: new Date().toISOString() },
-  { id: 'g2', name: 'EA SPORTS FC 26', slug: 'ea-fc', icon: 'Trophy', cover_image: 'https://images.unsplash.com/photo-1540747737956-37872404a82f?w=800&auto=format&fit=crop&q=60', created_at: new Date().toISOString() },
-  { id: 'g3', name: 'Valorant', slug: 'valorant', icon: 'Crosshair', cover_image: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800&auto=format&fit=crop&q=60', created_at: new Date().toISOString() },
-  { id: 'g4', name: 'Tekken 8', slug: 'tekken-8', icon: 'Sword', cover_image: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=800&auto=format&fit=crop&q=60', created_at: new Date().toISOString() },
-  { id: 'g5', name: 'Mortal Kombat 1', slug: 'mortal-kombat-1', icon: 'Flame', cover_image: 'https://images.unsplash.com/photo-1552820728-8b83bb6b773f?w=800&auto=format&fit=crop&q=60', created_at: new Date().toISOString() }
-];
-
-const MOCK_PROFILES: Profile[] = [
-  { id: 'u-admin', username: 'OkonAdmin', email: 'okoncompassionate@gmail.com', role: 'admin', bio: 'Senior Product Designer and Lead Developer of KickOff.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=okon', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-org1', username: 'ApexOrganizer', email: 'apex_org@kickoff.gg', role: 'organizer', bio: 'Veteran esports host with 5+ years of experience.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=apex', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-org2', username: 'ESL_Host', email: 'esl@kickoff.gg', role: 'organizer', bio: 'Hosting the best regional fighting game brackets.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=esl', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  // Players
-  { id: 'u-p1', username: 'Xenon', email: 'xenon@kickoff.gg', role: 'player', bio: 'FPS specialist and Valorant Radiant player.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=xenon', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p2', username: 'ApexPredator', email: 'apex@kickoff.gg', role: 'player', bio: 'eFootball Division 1 top 100.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=apexpred', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p3', username: 'StormBreaker', email: 'storm@kickoff.gg', role: 'player', bio: 'EA FC competitor.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=storm', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p4', username: 'ShadowStrike', email: 'shadow@kickoff.gg', role: 'player', bio: 'Tekken 8 Jin main.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=shadow', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p5', username: 'GlitchGG', email: 'glitch@kickoff.gg', role: 'player', bio: 'Mortal Kombat Scorpion loyalist.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=glitch', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p6', username: 'Cipher', email: 'cipher@kickoff.gg', role: 'player', bio: 'Play to win.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=cipher', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p7', username: 'Viper_Striker', email: 'viper@kickoff.gg', role: 'player', bio: 'EA FC enthusiast.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=viper', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p8', username: 'PixelKing', email: 'pixel@kickoff.gg', role: 'player', bio: 'Fighter game professional.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=pixel', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p9', username: 'QuantumFlux', email: 'quantum@kickoff.gg', role: 'player', bio: 'Always adapting.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=quantum', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p10', username: 'VoltFighter', email: 'volt@kickoff.gg', role: 'player', bio: 'Tekken is life.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=volt', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p11', username: 'AlphaElite', email: 'alpha@kickoff.gg', role: 'player', bio: 'eFootball tactical wizard.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=alpha', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p12', username: 'SpectreGaming', email: 'spectre@kickoff.gg', role: 'player', bio: 'Silent but deadly.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=spectre', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p13', username: 'RiftWalker', email: 'rift@kickoff.gg', role: 'player', bio: 'Valorant Sentinel main.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=rift', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p14', username: 'NovaFlares', email: 'nova@kickoff.gg', role: 'player', bio: 'eFootball competitive squad.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=nova', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p15', username: 'ZephyrWind', email: 'zephyr@kickoff.gg', role: 'player', bio: 'FGC player from EU.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=zephyr', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'u-p16', username: 'OnyxBeast', email: 'onyx@kickoff.gg', role: 'player', bio: 'Heavy hitter.', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=onyx', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-];
-
-const MOCK_ACHIEVEMENTS: Achievement[] = [
-  { id: 'ac1', name: 'First Victory', description: 'Win your first tournament match', badge_icon: 'Award', xp_reward: 100 },
-  { id: 'ac2', name: 'Flawless Win', description: 'Win a match without conceding a single round/score', badge_icon: 'Zap', xp_reward: 150 },
-  { id: 'ac3', name: 'Champion Ascent', description: 'Win a KickOff grand championship tournament', badge_icon: 'Trophy', xp_reward: 500 },
-  { id: 'ac4', name: 'Tournament Spree', description: 'Register for 5 separate tournaments', badge_icon: 'Flame', xp_reward: 200 },
-  { id: 'ac5', name: 'Veracious Reporter', description: 'Submit tournament scores with verified screenshots', badge_icon: 'Shield', xp_reward: 100 }
-];
-
-// Seed 3 tournaments
-const MOCK_TOURNAMENTS: Tournament[] = [
-  {
-    id: 't1',
-    title: 'eFootball Pro Championship 2026',
-    description: 'The ultimate eFootball tournament for regional Division 1 players. Fight for glory and cash prizes.',
-    game_id: 'g1',
-    organizer_id: 'u-org1',
-    banner_url: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=1200&auto=format&fit=crop&q=80',
-    max_players: 8,
-    status: 'registration',
-    start_time: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days from now
-    format: 'single_elimination',
-    prize_pool: '$5,000 USD',
-    rules: '1. Matches are 10 minutes in game time.\n2. In case of draw, Extra Time and Penalties apply.\n3. Toxic behavior leads to immediate disqualification.\n4. Results must be submitted within 15 minutes of match completion.',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  {
-    id: 't2',
-    title: 'EA FC 26 Super Cup',
-    description: 'Enter the pitch and prove you are the best EA Sports FC player in the community.',
-    game_id: 'g2',
-    organizer_id: 'u-org1',
-    banner_url: 'https://images.unsplash.com/photo-1540747737956-37872404a82f?w=1200&auto=format&fit=crop&q=80',
-    max_players: 8,
-    status: 'active',
-    start_time: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
-    format: 'single_elimination',
-    prize_pool: '$2,500 USD',
-    rules: 'Standard Ultimate Team squads permitted. Match length: 6 minutes halves.',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  },
-  {
-    id: 't3',
-    title: 'Tekken 8 Iron Fist Bracket',
-    description: 'Ready to throw down? The ultimate community bracket for Tekken 8. Open to all ranks.',
-    game_id: 'g4',
-    organizer_id: 'u-org2',
-    banner_url: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=1200&auto=format&fit=crop&q=80',
-    max_players: 8,
-    status: 'completed',
-    start_time: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 days ago
-    format: 'single_elimination',
-    prize_pool: '$1,000 USD + Gaming Chair',
-    rules: 'Standard tournament match configurations. 3 rounds of 60 seconds per set.',
-    winner_id: 'u-p4', // ShadowStrike
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+const assertSupabase = () => {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase is not configured. Live mode requires a connected Supabase database.');
   }
-];
-
-// Seed registrations for t1 (registration stage) and t2 (active stage) and t3 (completed stage)
-const MOCK_TOURNAMENT_PLAYERS: TournamentPlayer[] = [
-  // registrations for Tournament 1 (eFootball) - 6 approved, 2 pending
-  { id: 'tp-1-1', tournament_id: 't1', player_id: 'u-admin', status: 'approved', seed_no: 1, created_at: new Date().toISOString() },
-  { id: 'tp-1-2', tournament_id: 't1', player_id: 'u-p2', status: 'approved', seed_no: 2, created_at: new Date().toISOString() },
-  { id: 'tp-1-3', tournament_id: 't1', player_id: 'u-p3', status: 'approved', seed_no: 3, created_at: new Date().toISOString() },
-  { id: 'tp-1-4', tournament_id: 't1', player_id: 'u-p11', status: 'approved', seed_no: 4, created_at: new Date().toISOString() },
-  { id: 'tp-1-5', tournament_id: 't1', player_id: 'u-p14', status: 'approved', seed_no: 5, created_at: new Date().toISOString() },
-  { id: 'tp-1-6', tournament_id: 't1', player_id: 'u-p6', status: 'approved', seed_no: 6, created_at: new Date().toISOString() },
-  { id: 'tp-1-7', tournament_id: 't1', player_id: 'u-p7', status: 'pending', created_at: new Date().toISOString() },
-  { id: 'tp-1-8', tournament_id: 't1', player_id: 'u-p8', status: 'pending', created_at: new Date().toISOString() },
-
-  // registrations for Tournament 2 (EA FC) - 8 approved (active tournament, bracket generated)
-  { id: 'tp-2-1', tournament_id: 't2', player_id: 'u-admin', status: 'approved', seed_no: 1, created_at: new Date().toISOString() },
-  { id: 'tp-2-2', tournament_id: 't2', player_id: 'u-p2', status: 'approved', seed_no: 2, created_at: new Date().toISOString() },
-  { id: 'tp-2-3', tournament_id: 't2', player_id: 'u-p3', status: 'approved', seed_no: 3, created_at: new Date().toISOString() },
-  { id: 'tp-2-4', tournament_id: 't2', player_id: 'u-p7', status: 'approved', seed_no: 4, created_at: new Date().toISOString() },
-  { id: 'tp-2-5', tournament_id: 't2', player_id: 'u-p8', status: 'approved', seed_no: 5, created_at: new Date().toISOString() },
-  { id: 'tp-2-6', tournament_id: 't2', player_id: 'u-p9', status: 'approved', seed_no: 6, created_at: new Date().toISOString() },
-  { id: 'tp-2-7', tournament_id: 't2', player_id: 'u-p11', status: 'approved', seed_no: 7, created_at: new Date().toISOString() },
-  { id: 'tp-2-8', tournament_id: 't2', player_id: 'u-p12', status: 'approved', seed_no: 8, created_at: new Date().toISOString() },
-
-  // registrations for Tournament 3 (Tekken 8) - 8 approved
-  { id: 'tp-3-1', tournament_id: 't3', player_id: 'u-p4', status: 'approved', seed_no: 1, created_at: new Date().toISOString() },
-  { id: 'tp-3-2', tournament_id: 't3', player_id: 'u-p5', status: 'approved', seed_no: 2, created_at: new Date().toISOString() },
-  { id: 'tp-3-3', tournament_id: 't3', player_id: 'u-p10', status: 'approved', seed_no: 3, created_at: new Date().toISOString() },
-  { id: 'tp-3-4', tournament_id: 't3', player_id: 'u-p15', status: 'approved', seed_no: 4, created_at: new Date().toISOString() },
-  { id: 'tp-3-5', tournament_id: 't3', player_id: 'u-p16', status: 'approved', seed_no: 5, created_at: new Date().toISOString() },
-  { id: 'tp-3-6', tournament_id: 't3', player_id: 'u-p1', status: 'approved', seed_no: 6, created_at: new Date().toISOString() },
-  { id: 'tp-3-7', tournament_id: 't3', player_id: 'u-p6', status: 'approved', seed_no: 7, created_at: new Date().toISOString() },
-  { id: 'tp-3-8', tournament_id: 't3', player_id: 'u-p8', status: 'approved', seed_no: 8, created_at: new Date().toISOString() }
-];
-
-// Seed matches for t2 (active, single elimination, size 8)
-// 4 matches in round 1, 2 matches in round 2, 1 match in round 3 (finals)
-const MOCK_MATCHES: Match[] = [
-  // --- TOURNAMENT 2 (EA FC) ---
-  // Round 1
-  { id: 'm-2-1', tournament_id: 't2', round_no: 1, match_no: 1, player1_id: 'u-admin', player2_id: 'u-p12', player1_score: 3, player2_score: 1, winner_id: 'u-admin', status: 'completed', next_match_id: 'm-2-5', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'm-2-2', tournament_id: 't2', round_no: 1, match_no: 2, player1_id: 'u-p2', player2_id: 'u-p11', player1_score: 0, player2_score: 2, winner_id: 'u-p11', status: 'completed', next_match_id: 'm-2-5', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'm-2-3', tournament_id: 't2', round_no: 1, match_no: 3, player1_id: 'u-p3', player2_id: 'u-p9', player1_score: 0, player2_score: 0, winner_id: undefined, status: 'playing', next_match_id: 'm-2-6', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'm-2-4', tournament_id: 't2', round_no: 1, match_no: 4, player1_id: 'u-p7', player2_id: 'u-p8', player1_score: 4, player2_score: 2, winner_id: 'u-p7', status: 'completed', next_match_id: 'm-2-6', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  // Round 2 (Semifinals)
-  { id: 'm-2-5', tournament_id: 't2', round_no: 2, match_no: 1, player1_id: 'u-admin', player2_id: 'u-p11', player1_score: 0, player2_score: 0, winner_id: undefined, status: 'scheduled', next_match_id: 'm-2-7', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'm-2-6', tournament_id: 't2', round_no: 2, match_no: 2, player1_id: undefined, player2_id: 'u-p7', player1_score: 0, player2_score: 0, winner_id: undefined, status: 'waiting', next_match_id: 'm-2-7', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  // Round 3 (Finals)
-  { id: 'm-2-7', tournament_id: 't2', round_no: 3, match_no: 1, player1_id: undefined, player2_id: undefined, player1_score: 0, player2_score: 0, winner_id: undefined, status: 'waiting', next_match_id: undefined, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-
-  // --- TOURNAMENT 3 (Tekken 8 - Completed) ---
-  // Round 1
-  { id: 'm-3-1', tournament_id: 't3', round_no: 1, match_no: 1, player1_id: 'u-p4', player2_id: 'u-p8', player1_score: 2, player2_score: 0, winner_id: 'u-p4', status: 'completed', next_match_id: 'm-3-5', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'm-3-2', tournament_id: 't3', round_no: 1, match_no: 2, player1_id: 'u-p5', player2_id: 'u-p6', player1_score: 2, player2_score: 1, winner_id: 'u-p5', status: 'completed', next_match_id: 'm-3-5', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'm-3-3', tournament_id: 't3', round_no: 1, match_no: 3, player1_id: 'u-p10', player2_id: 'u-p1', player1_score: 1, player2_score: 2, winner_id: 'u-p1', status: 'completed', next_match_id: 'm-3-6', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'm-3-4', tournament_id: 't3', round_no: 1, match_no: 4, player1_id: 'u-p15', player2_id: 'u-p16', player1_score: 2, player2_score: 0, winner_id: 'u-p15', status: 'completed', next_match_id: 'm-3-6', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  // Round 2
-  { id: 'm-3-5', tournament_id: 't3', round_no: 2, match_no: 1, player1_id: 'u-p4', player2_id: 'u-p5', player1_score: 2, player2_score: 1, winner_id: 'u-p4', status: 'completed', next_match_id: 'm-3-7', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'm-3-6', tournament_id: 't3', round_no: 2, match_no: 2, player1_id: 'u-p1', player2_id: 'u-p15', player1_score: 0, player2_score: 2, winner_id: 'u-p15', status: 'completed', next_match_id: 'm-3-7', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  // Round 3
-  { id: 'm-3-7', tournament_id: 't3', round_no: 3, match_no: 1, player1_id: 'u-p4', player2_id: 'u-p15', player1_score: 3, player2_score: 2, winner_id: 'u-p4', status: 'completed', next_match_id: undefined, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-];
-
-const MOCK_MATCH_RESULTS: MatchResult[] = [
-  { id: 'mr-2-1', match_id: 'm-2-1', submitted_by: 'u-admin', player1_score: 3, player2_score: 1, status: 'approved', proof_url: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=200', created_at: new Date().toISOString() }
-];
-
-const MOCK_LEADERBOARD: Leaderboard[] = [
-  { id: 'l1', user_id: 'u-p4', game_id: 'g4', rank_points: 1540, username: 'ShadowStrike', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=shadow', updated_at: new Date().toISOString() },
-  { id: 'l2', user_id: 'u-p2', game_id: 'g1', rank_points: 1480, username: 'ApexPredator', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=apexpred', updated_at: new Date().toISOString() },
-  { id: 'l3', user_id: 'u-admin', game_id: 'g1', rank_points: 1350, username: 'OkonAdmin', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=okon', updated_at: new Date().toISOString() },
-  { id: 'l4', user_id: 'u-admin', game_id: 'g2', rank_points: 1320, username: 'OkonAdmin', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=okon', updated_at: new Date().toISOString() },
-  { id: 'l5', user_id: 'u-p15', game_id: 'g4', rank_points: 1290, username: 'ZephyrWind', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=zephyr', updated_at: new Date().toISOString() },
-  { id: 'l6', user_id: 'u-p11', game_id: 'g1', rank_points: 1210, username: 'AlphaElite', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=alpha', updated_at: new Date().toISOString() },
-  { id: 'l7', user_id: 'u-p1', game_id: 'g3', rank_points: 1190, username: 'Xenon', avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=xenon', updated_at: new Date().toISOString() }
-];
-
-const MOCK_STATISTICS: PlayerStatistics[] = [
-  { id: 's1', user_id: 'u-admin', game_id: 'g1', matches_played: 12, matches_won: 9, matches_lost: 3, tournaments_played: 3, tournaments_won: 1, win_rate: 75.0, updated_at: new Date().toISOString() },
-  { id: 's2', user_id: 'u-admin', game_id: 'g2', matches_played: 8, matches_won: 5, matches_lost: 3, tournaments_played: 2, tournaments_won: 0, win_rate: 62.5, updated_at: new Date().toISOString() },
-  { id: 's3', user_id: 'u-p4', game_id: 'g4', matches_played: 15, matches_won: 13, matches_lost: 2, tournaments_played: 4, tournaments_won: 2, win_rate: 86.6, updated_at: new Date().toISOString() }
-];
-
-const MOCK_NOTIFICATIONS: Notification[] = [
-  { id: 'n1', user_id: 'u-admin', title: 'Welcome to KickOff!', content: 'Build tournaments, challenge players, and scale the regional leaderboards.', is_read: false, created_at: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString() },
-  { id: 'n2', user_id: 'u-admin', title: 'Tournament Starting Soon', content: 'Your registered tournament "eFootball Pro Championship" starts in 2 days.', link: '/tournaments/t1', is_read: false, created_at: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString() }
-];
-
-const MOCK_LOGS: ActivityLog[] = [
-  { id: 'log1', user_id: 'u-admin', action_type: 'AUTH_SIGNIN', description: 'User signed in successfully', created_at: new Date().toISOString() }
-];
-
-const MOCK_SETTINGS: Settings = {
-  id: 'set-admin',
-  user_id: 'u-admin',
-  push_notifications: true,
-  email_notifications: true,
-  public_profile: true,
-  dark_mode: true
 };
 
-// State wrappers for simulated Storage
-class StorageSimulator {
-  private getStorageItem<T>(key: string, defaultValue: T): T {
-    const item = localStorage.getItem(key);
-    if (!item) {
-      localStorage.setItem(key, JSON.stringify(defaultValue));
-      return defaultValue;
-    }
-    return JSON.parse(item);
+const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+const getSupabaseAuthUser = async () => {
+  assertSupabase();
+  const {
+    data: { user },
+    error
+  } = await supabase.auth.getUser();
+
+  if (error) {
+    console.error('[db] supabase.auth.getUser() failed:', error);
+    throw error;
   }
 
-  private setStorageItem<T>(key: string, value: T): void {
-    localStorage.setItem(key, JSON.stringify(value));
+  if (!user?.id) {
+    throw new Error('No authenticated Supabase user found.');
   }
 
-  get currentUser(): Profile {
-    return this.getStorageItem<Profile>('ko_current_user', MOCK_PROFILES[0]);
-  }
-  set currentUser(user: Profile) {
-    this.setStorageItem('ko_current_user', user);
-    // Sync into profiles array too
-    const profiles = this.profiles;
-    const index = profiles.findIndex(p => p.id === user.id);
-    if (index >= 0) {
-      profiles[index] = user;
-      this.profiles = profiles;
-    }
+  if (!isUuid(user.id)) {
+    throw new Error(`Authenticated Supabase user id is not a valid UUID: ${user.id}`);
   }
 
-  get profiles(): Profile[] {
-    return this.getStorageItem<Profile[]>('ko_profiles', MOCK_PROFILES);
-  }
-  set profiles(val: Profile[]) { this.setStorageItem('ko_profiles', val); }
+  return user;
+};
 
-  get games(): Game[] {
-    return this.getStorageItem<Game[]>('ko_games', MOCK_GAMES);
-  }
-  set games(val: Game[]) { this.setStorageItem('ko_games', val); }
+const getSupabaseUserWithProfile = async () => {
+  assertSupabase();
+  const authUser = await getSupabaseAuthUser();
 
-  get tournaments(): Tournament[] {
-    return this.getStorageItem<Tournament[]>('ko_tournaments', MOCK_TOURNAMENTS);
-  }
-  set tournaments(val: Tournament[]) { this.setStorageItem('ko_tournaments', val); }
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', authUser.id)
+    .maybeSingle();
 
-  get tournamentPlayers(): TournamentPlayer[] {
-    return this.getStorageItem<TournamentPlayer[]>('ko_tournament_players', MOCK_TOURNAMENT_PLAYERS);
-  }
-  set tournamentPlayers(val: TournamentPlayer[]) { this.setStorageItem('ko_tournament_players', val); }
+  if (profileError) throw profileError;
 
-  get matches(): Match[] {
-    return this.getStorageItem<Match[]>('ko_matches', MOCK_MATCHES);
-  }
-  set matches(val: Match[]) { this.setStorageItem('ko_matches', val); }
+  return {
+    authUser,
+    profile: profile as { role?: string } | null
+  };
+};
 
-  get matchResults(): MatchResult[] {
-    return this.getStorageItem<MatchResult[]>('ko_match_results', MOCK_MATCH_RESULTS);
+const DEFAULT_GAMES: Omit<Game, 'created_at' | 'id'>[] = [
+  {
+    name: 'eFootball',
+    slug: 'efootball',
+    icon: 'Gamepad2',
+    cover_image: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800&auto=format&fit=crop&q=60'
+  },
+  {
+    name: 'EA FC 26',
+    slug: 'ea-fc-26',
+    icon: 'Trophy',
+    cover_image: 'https://images.unsplash.com/photo-1540747737956-37872404a82f?w=800&auto=format&fit=crop&q=60'
   }
-  set matchResults(val: MatchResult[]) { this.setStorageItem('ko_match_results', val); }
+];
 
-  get notifications(): Notification[] {
-    return this.getStorageItem<Notification[]>('ko_notifications', MOCK_NOTIFICATIONS);
-  }
-  set notifications(val: Notification[]) { this.setStorageItem('ko_notifications', val); }
+const DEFAULT_ACHIEVEMENTS: Omit<Achievement, 'id'>[] = [
+  { name: 'First Victory', description: 'Win your first tournament match', badge_icon: 'Award', xp_reward: 100 },
+  { name: 'Champion Ascent', description: 'Win a KickOff grand championship tournament', badge_icon: 'Trophy', xp_reward: 500 }
+];
 
-  get leaderboards(): Leaderboard[] {
-    return this.getStorageItem<Leaderboard[]>('ko_leaderboards', MOCK_LEADERBOARD);
-  }
-  set leaderboards(val: Leaderboard[]) { this.setStorageItem('ko_leaderboards', val); }
+const ensureProfileAndSettings = async (userId: string, authUser: any) => {
+  assertSupabase();
 
-  get statistics(): PlayerStatistics[] {
-    return this.getStorageItem<PlayerStatistics[]>('ko_statistics', MOCK_STATISTICS);
-  }
-  set statistics(val: PlayerStatistics[]) { this.setStorageItem('ko_statistics', val); }
+  const { data: existingProfile, error: profileError } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
 
-  get logs(): ActivityLog[] {
-    return this.getStorageItem<ActivityLog[]>('ko_logs', MOCK_LOGS);
-  }
-  set logs(val: ActivityLog[]) { this.setStorageItem('ko_logs', val); }
-
-  get settings(): Settings {
-    return this.getStorageItem<Settings>('ko_settings', MOCK_SETTINGS);
-  }
-  set settings(val: Settings) { this.setStorageItem('ko_settings', val); }
-
-  get achievements(): Achievement[] {
-    return MOCK_ACHIEVEMENTS; // Readonly achievements configuration
+  if (profileError) {
+    console.error('[db] Failed to read profile while seeding:', profileError);
+    return;
   }
 
-  get userAchievements(): { user_id: string; achievement_id: string; earned_at: string }[] {
-    return this.getStorageItem('ko_user_achievements', [
-      { user_id: 'u-admin', achievement_id: 'ac1', earned_at: new Date().toISOString() },
-      { user_id: 'u-admin', achievement_id: 'ac5', earned_at: new Date().toISOString() }
-    ]);
-  }
-  set userAchievements(val: { user_id: string; achievement_id: string; earned_at: string }[]) {
-    this.setStorageItem('ko_user_achievements', val);
-  }
+  if (!existingProfile) {
+    const username = authUser?.user_metadata?.username || authUser?.email?.split('@')[0] || 'player';
+    const role = authUser?.user_metadata?.role || 'player';
 
-  get chatMessages(): ChatMessage[] {
-    return this.getStorageItem<ChatMessage[]>('ko_chat_messages', [
-      {
-        id: 'msg-1',
-        tournament_id: 'global',
-        user_id: 'u-p1',
-        username: 'Xenon',
-        avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=xenon',
-        content: 'Hey guys! Who is up for a quick Apex Legends bracket tonight?',
-        created_at: new Date(Date.now() - 3600000).toISOString()
-      },
-      {
-        id: 'msg-2',
-        tournament_id: 'global',
-        user_id: 'u-admin',
-        username: 'OkonAdmin',
-        avatar_url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=okon',
-        content: 'Welcome to KickOff! Feel free to create tournaments or join the existing active rosters.',
-        created_at: new Date(Date.now() - 1800000).toISOString()
-      }
-    ]);
-  }
-  set chatMessages(val: ChatMessage[]) {
-    this.setStorageItem('ko_chat_messages', val);
-  }
-
-  // Trigger achievement earning helper
-  earnAchievement(userId: string, achievementId: string) {
-    const arr = this.userAchievements;
-    if (!arr.some(ua => ua.user_id === userId && ua.achievement_id === achievementId)) {
-      arr.push({ user_id: userId, achievement_id: achievementId, earned_at: new Date().toISOString() });
-      this.userAchievements = arr;
-
-      // Add Notification
-      const ach = this.achievements.find(a => a.id === achievementId);
-      if (ach) {
-        this.addNotification(userId, 'Achievement Unlocked!', `You have earned the "${ach.name}" badge and +${ach.xp_reward} XP!`);
-      }
-    }
-  }
-
-  addNotification(userId: string, title: string, content: string, link?: string) {
-    const list = this.notifications;
-    list.unshift({
-      id: Math.random().toString(36).substring(7),
-      user_id: userId,
-      title,
-      content,
-      link,
-      is_read: false,
-      created_at: new Date().toISOString()
+    const { error: insertProfileError } = await supabase.from('profiles').insert({
+      id: userId,
+      username,
+      email: authUser?.email || `${username}@kickoff.local`,
+      avatar_url: authUser?.user_metadata?.avatar_url || null,
+      role,
+      bio: 'Joined through KickOff live mode.'
     });
-    this.notifications = list;
+
+    if (insertProfileError) {
+      console.error('[db] Failed to create profile for authenticated user:', insertProfileError);
+    }
   }
 
-  addLog(userId: string, actionType: string, description: string) {
-    const list = this.logs;
-    list.unshift({
-      id: Math.random().toString(36).substring(7),
+  const { data: existingSettings, error: settingsError } = await supabase
+    .from('settings')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (settingsError) {
+    console.error('[db] Failed to read settings while seeding:', settingsError);
+    return;
+  }
+
+  if (!existingSettings) {
+    const { error: insertSettingsError } = await supabase.from('settings').insert({
       user_id: userId,
-      action_type: actionType,
-      description,
-      created_at: new Date().toISOString()
+      push_notifications: true,
+      email_notifications: true,
+      public_profile: true,
+      dark_mode: true,
+      show_email: false,
+      allow_dms: true,
+      anonymous_mode: false
     });
-    this.logs = list;
+
+    if (insertSettingsError) {
+      console.error('[db] Failed to create settings for authenticated user:', insertSettingsError);
+    }
   }
-}
+};
 
-export const simulator = new StorageSimulator();
+const ensureGamesSeeded = async () => {
+  assertSupabase();
 
-// ==========================================
-// DUAL-MODE EXPORTED API FOR FRONTEND
-// ==========================================
+  const { data: existingGames, error: gamesReadError } = await supabase
+    .from('games')
+    .select('slug');
+
+  if (gamesReadError) {
+    console.error('[db] Failed to read games table while seeding:', gamesReadError);
+    return;
+  }
+
+  const existingSlugs = new Set((existingGames || []).map((g: any) => g.slug));
+  const gamesToSeed = DEFAULT_GAMES.filter(g => !existingSlugs.has(g.slug));
+
+  if (gamesToSeed.length === 0) return;
+
+  const { error: gamesInsertError } = await supabase.from('games').insert(gamesToSeed);
+  if (gamesInsertError) {
+    console.error('[db] Failed to seed default games:', gamesInsertError);
+  }
+};
+
+const ensureAchievementsSeeded = async () => {
+  assertSupabase();
+
+  const { data: existingAchievements, error: achievementsError } = await supabase.from('achievements').select('name');
+  if (achievementsError) {
+    console.error('[db] Failed to read achievements table while seeding:', achievementsError);
+    return;
+  }
+
+  const existingNames = new Set((existingAchievements || []).map((a: any) => a.name));
+  const achievementsToSeed = DEFAULT_ACHIEVEMENTS.filter(a => !existingNames.has(a.name));
+
+  if (achievementsToSeed.length === 0) return;
+
+  const { error: insertError } = await supabase.from('achievements').insert(achievementsToSeed);
+  if (insertError) {
+    console.error('[db] Failed to seed default achievements:', insertError);
+  }
+};
+
+export const ensureDbSeeded = async () => {
+  assertSupabase();
+
+  const {
+    data: { user },
+    error: authError
+  } = await supabase.auth.getUser();
+
+  if (authError || !user?.id) return;
+
+  await ensureProfileAndSettings(user.id, user);
+  await ensureGamesSeeded();
+  await ensureAchievementsSeeded();
+};
+
+const awardRankPoints = async (
+  userId: string,
+  gameId: string,
+  delta: number,
+  reason: string,
+  username?: string,
+  avatarUrl?: string
+) => {
+  assertSupabase();
+
+  const { data: existing, error } = await supabase
+    .from('leaderboards')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('game_id', gameId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[db] awardRankPoints failed:', error);
+    return;
+  }
+
+  if (existing) {
+    await supabase
+      .from('leaderboards')
+      .update({ rank_points: (existing.rank_points || 0) + delta, updated_at: new Date().toISOString() })
+      .eq('id', existing.id);
+    return;
+  }
+
+  await supabase.from('leaderboards').insert({
+    user_id: userId,
+    game_id: gameId,
+    rank_points: Math.max(0, delta),
+    username,
+    avatar_url: avatarUrl
+  });
+};
+
+const generateUuid = () =>
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+
+const normalizeUsername = (username: string) => username.trim().replace(/\s+/g, '_').toLowerCase();
+
+const maybeGenerateBracketWhenFull = async (tournamentId: string): Promise<boolean> => {
+  const tournament = await db.getTournament(tournamentId);
+  if (!tournament || tournament.status !== 'registration') return false;
+
+  const { data: existingMatches, error: matchesError } = await supabase
+    .from('matches')
+    .select('id')
+    .eq('tournament_id', tournamentId)
+    .limit(1);
+
+  if (matchesError) throw matchesError;
+  if (existingMatches && existingMatches.length > 0) return false;
+
+  const { count, error: countError } = await supabase
+    .from('tournament_players')
+    .select('id', { count: 'exact', head: true })
+    .eq('tournament_id', tournamentId)
+    .eq('status', 'approved');
+
+  if (countError) throw countError;
+  if ((count || 0) >= tournament.max_players) {
+    await db.generateBracket(tournamentId);
+    return true;
+  }
+
+  return false;
+};
+
+const getSettingsFromJoinedProfile = (profile: any) => {
+  const settings = Array.isArray(profile.settings) ? profile.settings[0] : profile.settings;
+  return {
+    public_profile: settings?.public_profile,
+    show_email: settings?.show_email,
+    allow_dms: settings?.allow_dms,
+    anonymous_mode: settings?.anonymous_mode
+  };
+};
+
+const getDmParticipantIds = (channelId: string): string[] => {
+  if (!channelId.startsWith('dm:')) return [];
+  return channelId.slice(3).split(':').filter(isUuid);
+};
+
+const usersAreFriends = async (userA: string, userB: string): Promise<boolean> => {
+  const requesterId = userA < userB ? userA : userB;
+  const addresseeId = userA < userB ? userB : userA;
+  const { data, error } = await supabase
+    .from('friendships')
+    .select('id')
+    .eq('requester_id', requesterId)
+    .eq('addressee_id', addresseeId)
+    .eq('status', 'accepted')
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+};
+
+const getReservedTournamentSlotCount = async (tournamentId: string, excludeRegistrationId?: string): Promise<number> => {
+  assertSupabase();
+
+  let query = supabase
+    .from('tournament_players')
+    .select('id', { count: 'exact', head: true })
+    .eq('tournament_id', tournamentId)
+    .in('status', ['approved', 'pending']);
+
+  if (excludeRegistrationId) {
+    query = query.neq('id', excludeRegistrationId);
+  }
+
+  const { count, error } = await query;
+  if (error) throw error;
+  return count || 0;
+};
+
+const getApprovedTournamentSlotCount = async (tournamentId: string, excludeRegistrationId?: string): Promise<number> => {
+  assertSupabase();
+
+  let query = supabase
+    .from('tournament_players')
+    .select('id', { count: 'exact', head: true })
+    .eq('tournament_id', tournamentId)
+    .eq('status', 'approved');
+
+  if (excludeRegistrationId) {
+    query = query.neq('id', excludeRegistrationId);
+  }
+
+  const { count, error } = await query;
+  if (error) throw error;
+  return count || 0;
+};
 
 export const db = {
-  // Authentication / Profile
-  getCurrentUser: async (): Promise<Profile> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        // Fetch public profile
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-        if (profile) return profile as Profile;
-      }
+  earnAchievement: async (userId: string, achievementName: string): Promise<void> => {
+    assertSupabase();
+
+    const { data: achievement, error: achError } = await supabase
+      .from('achievements')
+      .select('*')
+      .eq('name', achievementName)
+      .maybeSingle();
+
+    if (achError || !achievement) {
+      if (achError) console.error('[db.earnAchievement] Failed to read achievement:', achError);
+      return;
     }
-    // Fallback to simulator
-    return simulator.currentUser;
+
+    const { data: existing, error: existingError } = await supabase
+      .from('user_achievements')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('achievement_id', achievement.id)
+      .maybeSingle();
+
+    if (existingError) {
+      console.error('[db.earnAchievement] Failed to read user achievements:', existingError);
+      return;
+    }
+
+    if (!existing) {
+      await supabase.from('user_achievements').insert({ user_id: userId, achievement_id: achievement.id });
+      await supabase.from('notifications').insert({
+        user_id: userId,
+        title: 'Achievement Unlocked!',
+        content: `You have earned the "${achievement.name}" badge and +${achievement.xp_reward} XP!`,
+        is_read: false
+      });
+    }
+  },
+
+  getCurrentUser: async (): Promise<Profile> => {
+    assertSupabase();
+    await ensureDbSeeded();
+
+    const {
+      data: { user },
+      error
+    } = await supabase.auth.getUser();
+
+    if (error) throw error;
+    if (!user?.id) throw new Error('No authenticated Supabase user found.');
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profileError) throw profileError;
+    if (!profile) throw new Error('Authenticated user profile not found.');
+
+    return profile as Profile;
   },
 
   updateCurrentUserRole: async (role: UserRole): Promise<Profile> => {
-    const user = simulator.currentUser;
-    const updated = { ...user, role };
-    simulator.currentUser = updated;
-    simulator.addLog(user.id, 'ROLE_CHANGE', `Switched role to ${role}`);
-    return updated;
+    assertSupabase();
+    const user = await getSupabaseAuthUser();
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ role, updated_at: new Date().toISOString() })
+      .eq('id', user.id)
+      .select()
+      .single();
+
+    if (error || !data) {
+      throw error || new Error('Failed to update user role.');
+    }
+
+    await supabase.from('activity_logs').insert({
+      user_id: user.id,
+      action_type: 'ROLE_CHANGE',
+      description: `Switched role to ${role}`
+    });
+
+    return data as Profile;
   },
 
   updateUserProfile: async (id: string, updates: Partial<Profile>): Promise<Profile> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
-      if (!error && data) return data as Profile;
-    }
-    
-    // Offline simulation
-    const profiles = simulator.profiles;
-    const idx = profiles.findIndex(p => p.id === id);
-    if (idx >= 0) {
-      profiles[idx] = { ...profiles[idx], ...updates, updated_at: new Date().toISOString() };
-      simulator.profiles = profiles;
-      if (simulator.currentUser.id === id) {
-        simulator.currentUser = profiles[idx];
+    assertSupabase();
+
+    if (updates.username) {
+      const normalizedUsername = normalizeUsername(updates.username);
+      if (normalizedUsername.length < 3) {
+        throw new Error('Username must be at least 3 characters.');
       }
-      simulator.addLog(id, 'PROFILE_UPDATE', 'Updated user profile information');
-      return profiles[idx];
+
+      const available = await db.isUsernameAvailable(normalizedUsername, id);
+      if (!available) {
+        throw new Error('That username is already taken.');
+      }
+
+      updates.username = normalizedUsername;
     }
-    throw new Error('Profile not found');
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error || !data) throw error || new Error('Failed to update user profile.');
+
+    await supabase.from('activity_logs').insert({
+      user_id: id,
+      action_type: 'PROFILE_UPDATE',
+      description: 'Updated user profile information'
+    });
+
+    return data as Profile;
   },
 
   getProfiles: async (): Promise<Profile[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase.from('profiles').select('*');
-      if (data) return data as Profile[];
-    }
-    return simulator.profiles;
+    assertSupabase();
+    const { data, error } = await supabase.from('profiles').select('*');
+    if (error) throw error;
+    return (data || []).map((profile: any) => ({
+      ...profile,
+      ...getSettingsFromJoinedProfile(profile)
+    })) as Profile[];
+  },
+
+  searchProfiles: async (query: string): Promise<Profile[]> => {
+    assertSupabase();
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+
+    const { data, error } = await supabase.from('profiles').select('*').limit(12);
+    if (error) throw error;
+
+    return (data || [])
+      .filter((profile: any) => {
+        const searchableText = `${profile?.username ?? ''} ${profile?.email ?? ''} ${profile?.role ?? ''}`.toLowerCase();
+        return searchableText.includes(q);
+      })
+      .slice(0, 12)
+      .map((profile: any) => ({
+        ...profile,
+        ...getSettingsFromJoinedProfile(profile)
+      })) as Profile[];
+  },
+
+  isUsernameAvailable: async (username: string, excludeUserId?: string): Promise<boolean> => {
+    assertSupabase();
+    const normalizedUsername = normalizeUsername(username);
+    let query = supabase.from('profiles').select('id').eq('username', normalizedUsername).limit(1);
+    if (excludeUserId) query = query.neq('id', excludeUserId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return !data || data.length === 0;
   },
 
   getGames: async (): Promise<Game[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase.from('games').select('*');
-      if (data) return data as Game[];
-    }
-    return simulator.games;
+    assertSupabase();
+    const { data, error } = await supabase.from('games').select('*').order('created_at', { ascending: true });
+    if (error) throw error;
+    return data as Game[];
   },
 
-  // Tournaments
   getTournaments: async (): Promise<Tournament[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('tournaments')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (data) return data as Tournament[];
-    }
-    return simulator.tournaments;
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('tournaments')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data as Tournament[];
   },
 
   getTournament: async (id: string): Promise<Tournament | undefined> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('tournaments')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (data) return data as Tournament;
-    }
-    return simulator.tournaments.find(t => t.id === id);
+    assertSupabase();
+    if (!isUuid(id)) throw new Error('Tournament id must be a valid UUID.');
+
+    const { data, error } = await supabase
+      .from('tournaments')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return data as Tournament | undefined;
   },
 
-  createTournament: async (tournament: Omit<Tournament, 'id' | 'created_at' | 'updated_at'>): Promise<Tournament> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('tournaments')
-        .insert([tournament])
-        .select()
-        .single();
-      if (!error && data) return data as Tournament;
+  createTournament: async (tournament: Omit<Tournament, 'id' | 'created_at' | 'updated_at' | 'organizer_id'>): Promise<Tournament> => {
+    assertSupabase();
+
+    if (!tournament.title?.trim()) throw new Error('Tournament title is required.');
+    if (!tournament.start_time?.trim()) throw new Error('Tournament start time is required.');
+    if (!tournament.game_id?.trim()) throw new Error('Tournament game_id is required.');
+    if (!isUuid(tournament.game_id)) throw new Error('Tournament game_id must be a valid UUID.');
+
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      console.warn('[db.createTournament] supabase.auth.getSession failed:', sessionError);
     }
 
-    const newTournament: Tournament = {
+    const sessionUserId = session?.user?.id;
+    const accessTokenExists = !!session?.access_token;
+    const user = session?.user ?? (await getSupabaseAuthUser());
+
+    if (!accessTokenExists || !sessionUserId) {
+      console.error('[db.createTournament] No active Supabase auth session available. Ensure the user is signed in and the access token is present.');
+      throw new Error('Tournament creation requires an active Supabase auth session. Please sign in again.');
+    }
+
+    if (!user?.id) {
+      throw new Error('No authenticated Supabase user found when creating a tournament. Please sign in again.');
+    }
+
+    const organizerId = user.id;
+    if (sessionUserId !== organizerId) {
+      console.error('[db.createTournament] Supabase session user ID does not match authenticated user ID', {
+        sessionUserId,
+        organizerId
+      });
+      throw new Error('Authenticated Supabase session user does not match the current organizer. Please sign in again.');
+    }
+
+    console.info('[db.createTournament] creating tournament', {
+      organizerId,
+      sessionUserId,
+      hasAccessToken: accessTokenExists,
+      game_id: tournament.game_id
+    });
+
+    const { data: gameRecord, error: gameError } = await supabase
+      .from('games')
+      .select('id')
+      .eq('id', tournament.game_id)
+      .maybeSingle();
+
+    if (gameError || !gameRecord) {
+      throw new Error(`Invalid game_id for tournament creation: ${tournament.game_id}`);
+    }
+
+    const tournamentToInsert = {
       ...tournament,
-      id: Math.random().toString(36).substring(7),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      organizer_id: organizerId,
+      max_players: Number(tournament.max_players) || 16,
+      entry_fee: tournament.entry_fee ?? 0,
+      payment_provider: tournament.payment_provider || 'none',
+      auto_lock_registration: tournament.auto_lock_registration ?? true,
+      points_only: tournament.points_only ?? false,
+      status: tournament.status || 'registration',
+      format: tournament.format || 'single_elimination'
     };
 
-    const list = simulator.tournaments;
-    list.unshift(newTournament);
-    simulator.tournaments = list;
+    const { data, error } = await supabase
+      .from('tournaments')
+      .insert([tournamentToInsert])
+      .select()
+      .single();
 
-    simulator.addLog(tournament.organizer_id, 'TOURNAMENT_CREATE', `Created tournament "${tournament.title}"`);
-    return newTournament;
+    if (error || !data) {
+      console.error('[db.createTournament] Failed to create tournament in Supabase:', error);
+      throw error || new Error('Failed to create tournament in Supabase.');
+    }
+
+    await supabase.from('activity_logs').insert({
+      user_id: user.id,
+      action_type: 'TOURNAMENT_CREATE',
+      description: `Created tournament "${tournament.title}"`
+    });
+
+    return data as Tournament;
   },
 
   updateTournamentStatus: async (id: string, status: TournamentStatus, winnerId?: string): Promise<Tournament> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('tournaments')
-        .update({ status, winner_id: winnerId, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
-      if (!error && data) return data as Tournament;
-    }
+    assertSupabase();
 
-    const list = simulator.tournaments;
-    const idx = list.findIndex(t => t.id === id);
-    if (idx >= 0) {
-      list[idx] = { ...list[idx], status, winner_id: winnerId, updated_at: new Date().toISOString() };
-      simulator.tournaments = list;
+    const { data: tournament, error: tournamentError } = await supabase
+      .from('tournaments')
+      .update({ status, winner_id: winnerId || null, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .maybeSingle();
 
-      // Log activity
-      const t = list[idx];
-      simulator.addLog(t.organizer_id, 'TOURNAMENT_UPDATE', `Tournament "${t.title}" status changed to ${status}`);
+    if (tournamentError || !tournament) throw tournamentError || new Error('Failed to update tournament status');
 
-      // If completed, trigger achievement for winner and trigger notifications
-      if (status === 'completed' && winnerId) {
-        simulator.earnAchievement(winnerId, 'ac3'); // Champion Ascent
-        
-        // Notify players
-        const regs = simulator.tournamentPlayers.filter(p => p.tournament_id === id && p.status === 'approved');
-        regs.forEach(reg => {
-          simulator.addNotification(
-            reg.player_id, 
-            'Tournament Crowned!', 
-            `"${t.title}" has concluded. Congratulations to the Champion!`, 
-            `/tournaments/${id}`
-          );
-        });
+    await supabase.from('activity_logs').insert({
+      user_id: tournament.organizer_id,
+      action_type: 'TOURNAMENT_UPDATE',
+      description: `Tournament "${tournament.title}" status changed to ${status}`
+    });
 
-        // Update winner statistics
-        const stats = simulator.statistics;
-        const winnerStatsIdx = stats.findIndex(s => s.user_id === winnerId && s.game_id === t.game_id);
-        if (winnerStatsIdx >= 0) {
-          stats[winnerStatsIdx].tournaments_won += 1;
-          stats[winnerStatsIdx].tournaments_played += 1;
-          stats[winnerStatsIdx].updated_at = new Date().toISOString();
-          simulator.statistics = stats;
-        } else {
-          stats.push({
-            id: Math.random().toString(36).substring(7),
-            user_id: winnerId,
-            game_id: t.game_id,
-            matches_played: 3,
-            matches_won: 3,
-            matches_lost: 0,
-            tournaments_played: 1,
-            tournaments_won: 1,
-            win_rate: 100.0,
-            updated_at: new Date().toISOString()
-          });
-          simulator.statistics = stats;
-        }
+    if (status === 'completed' && winnerId) {
+      await db.earnAchievement(winnerId, 'Champion Ascent');
 
-        // Leaderboard point bump for winner
-        const lb = simulator.leaderboards;
-        const winnerLbIdx = lb.findIndex(l => l.user_id === winnerId && l.game_id === t.game_id);
-        if (winnerLbIdx >= 0) {
-          lb[winnerLbIdx].rank_points += 300;
-          lb[winnerLbIdx].updated_at = new Date().toISOString();
-        } else {
-          const profile = simulator.profiles.find(p => p.id === winnerId);
-          lb.push({
-            id: Math.random().toString(36).substring(7),
-            user_id: winnerId,
-            game_id: t.game_id,
-            rank_points: 1300,
-            username: profile?.username || 'Unknown Winner',
-            avatar_url: profile?.avatar_url,
-            updated_at: new Date().toISOString()
-          });
-        }
-        simulator.leaderboards = lb;
+      const { data: players } = await supabase
+        .from('tournament_players')
+        .select('player_id')
+        .eq('tournament_id', id)
+        .eq('status', 'approved');
+
+      if (players && players.length > 0) {
+        const notificationsToInsert = players.map((p: any) => ({
+          user_id: p.player_id,
+          title: 'Tournament Crowned!',
+          content: `"${tournament.title}" has concluded. Congratulations to the Champion!`,
+          link: `/tournaments/${id}`,
+          is_read: false
+        }));
+        await supabase.from('notifications').insert(notificationsToInsert);
       }
 
-      return list[idx];
-    }
-    throw new Error('Tournament not found');
-  },
-
-  // Registrations (Tournament Players)
-  getTournamentPlayers: async (tournamentId: string): Promise<TournamentPlayer[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('tournament_players')
+      const { data: existingStats } = await supabase
+        .from('player_statistics')
         .select('*')
-        .eq('tournament_id', tournamentId);
-      if (data) return data as TournamentPlayer[];
+        .eq('user_id', winnerId)
+        .eq('game_id', tournament.game_id)
+        .maybeSingle();
+
+      if (existingStats) {
+        await supabase
+          .from('player_statistics')
+          .update({
+            tournaments_played: (existingStats.tournaments_played || 0) + 1,
+            tournaments_won: (existingStats.tournaments_won || 0) + 1,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingStats.id);
+      } else {
+        await supabase.from('player_statistics').insert({
+          user_id: winnerId,
+          game_id: tournament.game_id,
+          matches_played: 0,
+          matches_won: 0,
+          matches_lost: 0,
+          tournaments_played: 1,
+          tournaments_won: 1,
+          win_rate: 0.0
+        });
+      }
+
+      await awardRankPoints(winnerId, tournament.game_id, 300, 'Tournament championship', tournament.title, tournament.banner_url);
     }
-    return simulator.tournamentPlayers.filter(p => p.tournament_id === tournamentId);
+
+    return tournament as Tournament;
   },
 
-  registerPlayer: async (tournamentId: string, playerId: string): Promise<TournamentPlayer> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('tournament_players')
-        .insert([{ tournament_id: tournamentId, player_id: playerId, status: 'pending' }])
-        .select()
-        .single();
-      if (!error && data) return data as TournamentPlayer;
+  getTournamentPlayers: async (tournamentId: string): Promise<TournamentPlayer[]> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('tournament_players')
+      .select('*')
+      .eq('tournament_id', tournamentId);
+    if (error) throw error;
+    return data as TournamentPlayer[];
+  },
+
+  getRosterCounts: async (): Promise<TournamentRosterCount[]> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('tournament_players')
+      .select('tournament_id, status');
+    if (error) throw error;
+
+    const counts = new Map<string, TournamentRosterCount>();
+    for (const row of (data || []) as any[]) {
+      const existing = counts.get(row.tournament_id) || {
+        tournament_id: row.tournament_id,
+        total: 0,
+        approved: 0,
+        pending: 0
+      };
+      existing.total += 1;
+      if (row.status === 'approved') existing.approved += 1;
+      if (row.status === 'pending') existing.pending += 1;
+      counts.set(row.tournament_id, existing);
+    }
+    return Array.from(counts.values());
+  },
+
+  getMyTournamentRegistrations: async (userId: string): Promise<TournamentPlayer[]> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('tournament_players')
+      .select('*')
+      .eq('player_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data as TournamentPlayer[];
+  },
+
+  registerPlayer: async (tournamentId: string, playerId: string, registrationData: Partial<TournamentPlayer> = {}): Promise<TournamentPlayer> => {
+    assertSupabase();
+    const tournament = await db.getTournament(tournamentId);
+    if (!tournament) throw new Error('Tournament not found.');
+    if (tournament.status !== 'registration') throw new Error('Registration is closed for this tournament.');
+
+    const requiresPayment = Boolean(tournament.entry_fee && tournament.entry_fee > 0);
+    const defaultStatus: PlayerRegistrationStatus = requiresPayment ? 'pending' : 'approved';
+    const defaultPaymentStatus = requiresPayment ? 'pending' : 'free';
+
+    if (tournament.organizer_id === playerId) {
+      throw new Error('The tournament host cannot join their own tournament as a competitor.');
     }
 
-    const existing = simulator.tournamentPlayers.find(tp => tp.tournament_id === tournamentId && tp.player_id === playerId);
-    if (existing) return existing;
+    const { data: existing } = await supabase
+      .from('tournament_players')
+      .select('*')
+      .eq('tournament_id', tournamentId)
+      .eq('player_id', playerId)
+      .maybeSingle();
 
-    const newReg: TournamentPlayer = {
-      id: Math.random().toString(36).substring(7),
-      tournament_id: tournamentId,
-      player_id: playerId,
-      status: 'pending',
-      created_at: new Date().toISOString()
-    };
+    if (existing) return existing as TournamentPlayer;
 
-    const list = simulator.tournamentPlayers;
-    list.push(newReg);
-    simulator.tournamentPlayers = list;
-
-    // Log Activity
-    simulator.addLog(playerId, 'TOURNAMENT_REGISTER', 'Registered for tournament');
-    
-    // Check Achievement: Tournament Spree (5 registrations)
-    const userRegsCount = simulator.tournamentPlayers.filter(tp => tp.player_id === playerId).length;
-    if (userRegsCount >= 5) {
-      simulator.earnAchievement(playerId, 'ac4'); // Tournament Spree
+    const reservedSlotCount = await getReservedTournamentSlotCount(tournamentId);
+    if (reservedSlotCount >= tournament.max_players) {
+      throw new Error('This tournament is full.');
     }
 
-    return newReg;
+    const { data, error } = await supabase
+      .from('tournament_players')
+      .insert([{
+        tournament_id: tournamentId,
+        player_id: playerId,
+        status: defaultStatus,
+        display_name: registrationData.display_name || null,
+        email: registrationData.email || null,
+        region: registrationData.region || null,
+        team_name: registrationData.team_name || null,
+        notes: registrationData.notes || null,
+        paid: !requiresPayment,
+        payment_status: defaultPaymentStatus,
+        payment_reference: registrationData.payment_reference || null
+      }])
+      .select()
+      .single();
+
+    if (error || !data) throw error || new Error('Failed to register player');
+
+    await supabase.from('activity_logs').insert({
+      user_id: playerId,
+      action_type: 'TOURNAMENT_REGISTER',
+      description: 'Registered for tournament'
+    });
+
+    if (defaultStatus === 'approved') await maybeGenerateBracketWhenFull(tournamentId);
+
+    return data as TournamentPlayer;
   },
 
   approvePlayer: async (registrationId: string, status: PlayerRegistrationStatus): Promise<TournamentPlayer> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from('tournament_players')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('id', registrationId)
-        .select()
-        .single();
-      if (!error && data) return data as TournamentPlayer;
+    assertSupabase();
+
+    const { data: existingReg, error: existingRegError } = await supabase
+      .from('tournament_players')
+      .select('tournament_id')
+      .eq('id', registrationId)
+      .maybeSingle();
+
+    if (existingRegError || !existingReg) throw existingRegError || new Error('Registration not found.');
+
+    if (status === 'approved') {
+      const tournament = await db.getTournament(existingReg.tournament_id);
+      if (!tournament) throw new Error('Tournament not found.');
+
+      const approvedCount = await getApprovedTournamentSlotCount(existingReg.tournament_id, registrationId);
+      if (approvedCount >= tournament.max_players) {
+        throw new Error('This approval would exceed the tournament player limit.');
+      }
     }
 
-    const list = simulator.tournamentPlayers;
-    const idx = list.findIndex(r => r.id === registrationId);
-    if (idx >= 0) {
-      list[idx] = { ...list[idx], status };
-      simulator.tournamentPlayers = list;
+    const { data: reg, error } = await supabase
+      .from('tournament_players')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', registrationId)
+      .select()
+      .single();
 
-      const reg = list[idx];
-      const tournament = simulator.tournaments.find(t => t.id === reg.tournament_id);
-      
-      // Notify player
-      simulator.addNotification(
-        reg.player_id,
-        status === 'approved' ? 'Registration Approved!' : 'Registration Update',
-        `Your slot in "${tournament?.title || 'tournament'}" has been ${status}.`,
-        `/tournaments/${reg.tournament_id}`
-      );
+    if (error || !reg) throw error || new Error('Failed to update registration');
 
-      return reg;
-    }
-    throw new Error('Registration not found');
+    const { data: tournament } = await supabase
+      .from('tournaments')
+      .select('title, max_players')
+      .eq('id', reg.tournament_id)
+      .maybeSingle();
+
+    await supabase.from('notifications').insert({
+      user_id: reg.player_id,
+      title: status === 'approved' ? 'Registration Approved!' : 'Registration Update',
+      content: `Your slot in "${tournament?.title || 'tournament'}" has been ${status}.`,
+      link: `/tournaments/${reg.tournament_id}`,
+      is_read: false
+    });
+
+    if (status === 'approved') await maybeGenerateBracketWhenFull(reg.tournament_id);
+
+    return reg as TournamentPlayer;
   },
 
-  // Matches & Bracket Generation
-  getMatches: async (tournamentId: string): Promise<Match[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
+  submitPaymentReference: async (registrationId: string, paymentReference: string): Promise<TournamentPlayer> => {
+    assertSupabase();
+    if (!paymentReference.trim()) throw new Error('Payment reference is required.');
+
+    const { data: reg, error } = await supabase
+      .from('tournament_players')
+      .update({
+        payment_reference: paymentReference.trim(),
+        payment_status: 'pending',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', registrationId)
+      .select()
+      .single();
+
+    if (error || !reg) throw error || new Error('Failed to submit payment reference.');
+
+    const { data: tournament } = await supabase
+      .from('tournaments')
+      .select('title, organizer_id')
+      .eq('id', reg.tournament_id)
+      .maybeSingle();
+
+    if (tournament?.organizer_id) {
+      await supabase.from('notifications').insert({
+        user_id: tournament.organizer_id,
+        title: 'Payment needs review',
+        content: `A payment reference was submitted for "${tournament.title}". Verify it before approving the slot.`,
+        link: `/tournaments/${reg.tournament_id}`,
+        is_read: false
+      });
+    }
+
+    return reg as TournamentPlayer;
+  },
+
+  markRegistrationPaid: async (registrationId: string, paymentReference: string): Promise<TournamentPlayer> => {
+    assertSupabase();
+
+    const currentUser = await db.getCurrentUser();
+    const { data: existingReg, error: existingRegError } = await supabase
+      .from('tournament_players')
+      .select('tournament_id, payment_reference')
+      .eq('id', registrationId)
+      .maybeSingle();
+
+    if (existingRegError || !existingReg) throw existingRegError || new Error('Registration not found.');
+
+    const tournament = await db.getTournament(existingReg.tournament_id);
+    if (!tournament) throw new Error('Tournament not found.');
+    if (currentUser.id !== tournament.organizer_id && currentUser.role !== 'admin') {
+      throw new Error('Only the tournament host can approve payment.');
+    }
+
+    const finalReference = paymentReference.trim() || existingReg.payment_reference;
+    if (!finalReference) throw new Error('A verifiable payment reference is required.');
+
+    const approvedCount = await getApprovedTournamentSlotCount(existingReg.tournament_id, registrationId);
+    if (approvedCount >= tournament.max_players) {
+      throw new Error('This tournament is full.');
+    }
+
+    const { data: reg, error } = await supabase
+      .from('tournament_players')
+      .update({
+        status: 'approved',
+        paid: true,
+        payment_status: 'paid',
+        payment_reference: finalReference,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', registrationId)
+      .select()
+      .single();
+
+    if (error || !reg) throw error || new Error('Failed to confirm payment');
+
+    await maybeGenerateBracketWhenFull(reg.tournament_id);
+
+    await supabase.from('notifications').insert({
+      user_id: reg.player_id,
+      title: 'Payment approved',
+      content: `Your payment for "${tournament.title}" was verified and your tournament slot is approved.`,
+      link: `/tournaments/${reg.tournament_id}`,
+      is_read: false
+    });
+
+    return reg as TournamentPlayer;
+  },
+
+  removeTournamentPlayer: async (registrationId: string, reason: string, disqualify = false): Promise<void> => {
+    assertSupabase();
+    const currentUser = await db.getCurrentUser();
+
+    const { data: reg, error: regError } = await supabase
+      .from('tournament_players')
+      .select('*')
+      .eq('id', registrationId)
+      .maybeSingle();
+
+    if (regError || !reg) throw regError || new Error('Registration not found.');
+
+    const tournament = await db.getTournament(reg.tournament_id);
+    if (!tournament) throw new Error('Tournament not found.');
+    if (currentUser.id !== tournament.organizer_id && currentUser.role !== 'admin') {
+      throw new Error('Only the tournament host can manage competitors.');
+    }
+
+    const cleanReason = reason.trim() || (disqualify ? 'Disqualified by tournament host.' : 'Removed by tournament host.');
+
+    if (tournament.status === 'active' || disqualify) {
+      const { error: updateError } = await supabase
+        .from('tournament_players')
+        .update({
+          status: 'rejected',
+          notes: [reg.notes, cleanReason].filter(Boolean).join('\n'),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', registrationId);
+      if (updateError) throw updateError;
+
+      const { data: openMatch } = await supabase
         .from('matches')
         .select('*')
-        .eq('tournament_id', tournamentId)
+        .eq('tournament_id', reg.tournament_id)
+        .in('status', ['waiting', 'playing', 'disputed'])
+        .or(`player1_id.eq.${reg.player_id},player2_id.eq.${reg.player_id}`)
         .order('round_no', { ascending: true })
-        .order('match_no', { ascending: true });
-      if (data) return data as Match[];
+        .limit(1)
+        .maybeSingle();
+
+      if (openMatch) {
+        const opponentId = openMatch.player1_id === reg.player_id ? openMatch.player2_id : openMatch.player1_id;
+        if (opponentId) {
+          await db.verifyMatchResult(
+            openMatch.id,
+            opponentId,
+            openMatch.player1_id === opponentId ? 3 : 0,
+            openMatch.player2_id === opponentId ? 3 : 0
+          );
+        } else {
+          const { error: matchUpdateError } = await supabase
+            .from('matches')
+            .update({ status: 'waiting', updated_at: new Date().toISOString() })
+            .eq('id', openMatch.id);
+          if (matchUpdateError) throw matchUpdateError;
+        }
+      }
+    } else {
+      const { error: deleteError } = await supabase.from('tournament_players').delete().eq('id', registrationId);
+      if (deleteError) throw deleteError;
     }
-    return simulator.matches.filter(m => m.tournament_id === tournamentId);
+
+    await supabase.from('notifications').insert({
+      user_id: reg.player_id,
+      title: disqualify ? 'Tournament disqualification' : 'Tournament slot removed',
+      content: `${disqualify ? 'You were disqualified from' : 'You were removed from'} "${tournament.title}". Reason: ${cleanReason}`,
+      link: `/tournaments/${reg.tournament_id}`,
+      is_read: false
+    });
+
+    await supabase.from('activity_logs').insert({
+      user_id: currentUser.id,
+      action_type: disqualify ? 'PLAYER_DISQUALIFY' : 'PLAYER_REMOVE',
+      description: `${disqualify ? 'Disqualified' : 'Removed'} a player from "${tournament.title}": ${cleanReason}`
+    });
+  },
+
+  sendTournamentNotice: async (tournamentId: string, recipientId: string, title: string, content: string): Promise<void> => {
+    assertSupabase();
+    const { data: tournament } = await supabase.from('tournaments').select('title').eq('id', tournamentId).maybeSingle();
+
+    await supabase.from('notifications').insert({
+      user_id: recipientId,
+      title: title || 'Tournament Update',
+      content: content || `A message was sent about "${tournament?.title || 'your tournament'}".`,
+      link: `/tournaments/${tournamentId}`,
+      is_read: false
+    });
+  },
+
+  getMatches: async (tournamentId: string): Promise<Match[]> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('tournament_id', tournamentId)
+      .order('round_no', { ascending: true })
+      .order('match_no', { ascending: true });
+    if (error) throw error;
+    return data as Match[];
   },
 
   generateBracket: async (tournamentId: string): Promise<Match[]> => {
-    if (isSupabaseConfigured && supabase) {
-      // In production, this can call a Postgres function or perform sequential inserts.
-      // We will perform client-side generation for simplicity and seamlessness.
+    assertSupabase();
+
+    const { data: existingMatches, error: existingMatchesError } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('tournament_id', tournamentId)
+      .order('round_no', { ascending: true })
+      .order('match_no', { ascending: true });
+
+    if (existingMatchesError) throw existingMatchesError;
+    if (existingMatches && existingMatches.length > 0) return existingMatches as Match[];
+
+    const tournament = await db.getTournament(tournamentId);
+    if (!tournament) throw new Error('Tournament not found.');
+
+    const { authUser, profile } = await getSupabaseUserWithProfile();
+    const canManageBracket = profile?.role === 'admin' || tournament.organizer_id === authUser.id;
+
+    if (!canManageBracket) {
+      throw new Error('Only the tournament organizer or an admin can generate a bracket.');
     }
 
-    // Get approved players
-    const approvedRegs = simulator.tournamentPlayers
-      .filter(tp => tp.tournament_id === tournamentId && tp.status === 'approved')
-      .slice(0, 8); // Support size 8 for seamless demo brackets
+    const { data: approvedPlayers, error: playersError } = await supabase
+      .from('tournament_players')
+      .select('player_id')
+      .eq('tournament_id', tournamentId)
+      .eq('status', 'approved');
 
-    if (approvedRegs.length < 2) {
+    if (playersError) throw playersError;
+
+    const playerIds = (approvedPlayers || [])
+      .map((p: any) => p.player_id)
+      .filter((playerId: string | undefined) => Boolean(playerId) && playerId !== tournament.organizer_id);
+
+    if (playerIds.length < 2) {
       throw new Error('At least 2 approved players are required to generate a bracket.');
     }
-
-    // Single Elimination Bracket Generation (assuming 8 players)
-    // Round 1 has 4 matches
-    // Round 2 (semis) has 2 matches
-    // Round 3 (finals) has 1 match
-    const numPlayers = approvedRegs.length;
-    let size = 8; // standard demo size
-    if (numPlayers <= 2) size = 2;
-    else if (numPlayers <= 4) size = 4;
-
-    const matchesToInsert: Match[] = [];
+    if (playerIds.length > tournament.max_players) {
+      throw new Error('Approved players exceed the tournament limit.');
+    }
     const now = new Date().toISOString();
+    const matchesToInsert: any[] = [];
 
-    // Create unique IDs beforehand
-    const fId = 'mf-' + Math.random().toString(36).substring(7); // Final Match ID
-    const sf1Id = 'msf1-' + Math.random().toString(36).substring(7); // Semifinal 1 ID
-    const sf2Id = 'msf2-' + Math.random().toString(36).substring(7); // Semifinal 2 ID
+    const getScheduledTime = (roundNo: number, matchNo: number) => {
+      const base = new Date(tournament.start_time);
+      const offsetMs = ((roundNo - 1) * 24 + (matchNo - 1) * 3) * 60 * 60 * 1000;
+      return new Date(base.getTime() + offsetMs).toISOString();
+    };
 
-    if (size === 8) {
-      // Round 3 (Finals)
-      const finalMatch: Match = {
-        id: fId, tournament_id: tournamentId, round_no: 3, match_no: 1,
-        player1_score: 0, player2_score: 0, status: 'waiting', created_at: now, updated_at: now
-      };
-      // Round 2 (Semifinals)
-      const sf1: Match = {
-        id: sf1Id, tournament_id: tournamentId, round_no: 2, match_no: 1,
-        player1_score: 0, player2_score: 0, status: 'waiting', next_match_id: fId, created_at: now, updated_at: now
-      };
-      const sf2: Match = {
-        id: sf2Id, tournament_id: tournamentId, round_no: 2, match_no: 2,
-        player1_score: 0, player2_score: 0, status: 'waiting', next_match_id: fId, created_at: now, updated_at: now
-      };
+    const addMatch = (partial: any) => {
+      matchesToInsert.push({
+        id: generateUuid(),
+        tournament_id: tournamentId,
+        player1_id: partial.player1_id || null,
+        player2_id: partial.player2_id || null,
+        player1_score: 0,
+        player2_score: 0,
+        winner_id: null,
+        status: partial.status || 'waiting',
+        round_no: partial.round_no,
+        match_no: partial.match_no,
+        next_match_id: partial.next_match_id || null,
+        scheduled_time: partial.scheduled_time || getScheduledTime(partial.round_no, partial.match_no),
+        created_at: now,
+        updated_at: now
+      });
+    };
 
-      // Round 1 (Quarterfinals)
-      const r1m1: Match = {
-        id: 'mr1m1-' + Math.random().toString(36).substring(7), tournament_id: tournamentId, round_no: 1, match_no: 1,
-        player1_id: approvedRegs[0]?.player_id, player2_id: approvedRegs[7]?.player_id || undefined,
-        player1_score: 0, player2_score: 0, status: approvedRegs[7] ? 'playing' : 'completed',
-        winner_id: approvedRegs[7] ? undefined : approvedRegs[0]?.player_id,
-        next_match_id: sf1Id, created_at: now, updated_at: now
-      };
-      const r1m2: Match = {
-        id: 'mr1m2-' + Math.random().toString(36).substring(7), tournament_id: tournamentId, round_no: 1, match_no: 2,
-        player1_id: approvedRegs[3]?.player_id || undefined, player2_id: approvedRegs[4]?.player_id || undefined,
-        player1_score: 0, player2_score: 0, status: (approvedRegs[3] && approvedRegs[4]) ? 'playing' : 'completed',
-        winner_id: (approvedRegs[3] && !approvedRegs[4]) ? approvedRegs[3].player_id : (approvedRegs[4] && !approvedRegs[3]) ? approvedRegs[4].player_id : undefined,
-        next_match_id: sf1Id, created_at: now, updated_at: now
-      };
-      const r1m3: Match = {
-        id: 'mr1m3-' + Math.random().toString(36).substring(7), tournament_id: tournamentId, round_no: 1, match_no: 3,
-        player1_id: approvedRegs[1]?.player_id || undefined, player2_id: approvedRegs[6]?.player_id || undefined,
-        player1_score: 0, player2_score: 0, status: (approvedRegs[1] && approvedRegs[6]) ? 'playing' : 'completed',
-        winner_id: (approvedRegs[1] && !approvedRegs[6]) ? approvedRegs[1].player_id : (approvedRegs[6] && !approvedRegs[1]) ? approvedRegs[6].player_id : undefined,
-        next_match_id: sf2Id, created_at: now, updated_at: now
-      };
-      const r1m4: Match = {
-        id: 'mr1m4-' + Math.random().toString(36).substring(7), tournament_id: tournamentId, round_no: 1, match_no: 4,
-        player1_id: approvedRegs[2]?.player_id || undefined, player2_id: approvedRegs[5]?.player_id || undefined,
-        player1_score: 0, player2_score: 0, status: (approvedRegs[2] && approvedRegs[5]) ? 'playing' : 'completed',
-        winner_id: (approvedRegs[2] && !approvedRegs[5]) ? approvedRegs[2].player_id : (approvedRegs[5] && !approvedRegs[2]) ? approvedRegs[5].player_id : undefined,
-        next_match_id: sf2Id, created_at: now, updated_at: now
-      };
-
-      // Set up Semifinal starters if bye-runs exist
-      if (r1m1.winner_id) sf1.player1_id = r1m1.winner_id;
-      if (r1m2.winner_id) sf1.player2_id = r1m2.winner_id;
-      if (r1m3.winner_id) sf2.player1_id = r1m3.winner_id;
-      if (r1m4.winner_id) sf2.player2_id = r1m4.winner_id;
-
-      if (sf1.player1_id && sf1.player2_id) sf1.status = 'playing';
-      if (sf2.player1_id && sf2.player2_id) sf2.status = 'playing';
-
-      matchesToInsert.push(r1m1, r1m2, r1m3, r1m4, sf1, sf2, finalMatch);
+    if (playerIds.length <= 2) {
+      addMatch({ round_no: 1, match_no: 1, player1_id: playerIds[0], player2_id: playerIds[1] || null, status: playerIds.length === 2 ? 'playing' : 'waiting' });
+    } else if (playerIds.length <= 4) {
+      const finalId = generateUuid();
+      addMatch({ round_no: 2, match_no: 1, next_match_id: null });
+      const semi1 = generateUuid();
+      const semi2 = generateUuid();
+      matchesToInsert[0].id = finalId;
+      addMatch({ round_no: 1, match_no: 1, player1_id: playerIds[0], player2_id: playerIds[3] || null, next_match_id: finalId, status: 'playing' });
+      addMatch({ round_no: 1, match_no: 2, player1_id: playerIds[1], player2_id: playerIds[2] || null, next_match_id: finalId, status: 'playing' });
     } else {
-      // 4 Player Bracket (Size 4)
-      const finalMatch: Match = {
-        id: fId, tournament_id: tournamentId, round_no: 2, match_no: 1,
-        player1_score: 0, player2_score: 0, status: 'waiting', created_at: now, updated_at: now
-      };
-      const r1m1: Match = {
-        id: sf1Id, tournament_id: tournamentId, round_no: 1, match_no: 1,
-        player1_id: approvedRegs[0]?.player_id, player2_id: approvedRegs[3]?.player_id || undefined,
-        player1_score: 0, player2_score: 0, status: approvedRegs[3] ? 'playing' : 'completed',
-        winner_id: approvedRegs[3] ? undefined : approvedRegs[0]?.player_id,
-        next_match_id: fId, created_at: now, updated_at: now
-      };
-      const r1m2: Match = {
-        id: sf2Id, tournament_id: tournamentId, round_no: 1, match_no: 2,
-        player1_id: approvedRegs[1]?.player_id || undefined, player2_id: approvedRegs[2]?.player_id || undefined,
-        player1_score: 0, player2_score: 0, status: (approvedRegs[1] && approvedRegs[2]) ? 'playing' : 'completed',
-        winner_id: (approvedRegs[1] && !approvedRegs[2]) ? approvedRegs[1].player_id : (approvedRegs[2] && !approvedRegs[1]) ? approvedRegs[2].player_id : undefined,
-        next_match_id: fId, created_at: now, updated_at: now
-      };
-
-      if (r1m1.winner_id) finalMatch.player1_id = r1m1.winner_id;
-      if (r1m2.winner_id) finalMatch.player2_id = r1m2.winner_id;
-      if (finalMatch.player1_id && finalMatch.player2_id) finalMatch.status = 'playing';
-
-      matchesToInsert.push(r1m1, r1m2, finalMatch);
+      const finalId = generateUuid();
+      const semi1Id = generateUuid();
+      const semi2Id = generateUuid();
+      addMatch({ round_no: 3, match_no: 1, next_match_id: null });
+      addMatch({ round_no: 2, match_no: 1, next_match_id: finalId });
+      addMatch({ round_no: 2, match_no: 2, next_match_id: finalId });
+      addMatch({ round_no: 1, match_no: 1, player1_id: playerIds[0], player2_id: playerIds[7] || null, next_match_id: semi1Id, status: 'playing' });
+      addMatch({ round_no: 1, match_no: 2, player1_id: playerIds[3], player2_id: playerIds[4] || null, next_match_id: semi1Id, status: 'playing' });
+      addMatch({ round_no: 1, match_no: 3, player1_id: playerIds[1], player2_id: playerIds[6] || null, next_match_id: semi2Id, status: 'playing' });
+      addMatch({ round_no: 1, match_no: 4, player1_id: playerIds[2], player2_id: playerIds[5] || null, next_match_id: semi2Id, status: 'playing' });
+      matchesToInsert[0].id = finalId;
+      matchesToInsert[1].id = semi1Id;
+      matchesToInsert[2].id = semi2Id;
     }
 
-    // Save matches
-    const allMatches = simulator.matches.filter(m => m.tournament_id !== tournamentId);
-    const updatedMatches = [...allMatches, ...matchesToInsert];
-    simulator.matches = updatedMatches;
+    const { data: insertedMatches, error: insertError } = await supabase
+      .from('matches')
+      .insert(matchesToInsert)
+      .select();
 
-    // Update Tournament Status to Active
-    const tournaments = simulator.tournaments;
-    const tIdx = tournaments.findIndex(t => t.id === tournamentId);
-    if (tIdx >= 0) {
-      tournaments[tIdx].status = 'active';
-      simulator.tournaments = tournaments;
+    if (insertError) {
+      const message = (insertError.message || '').toLowerCase();
+      if (insertError.code === '42501' || message.includes('row-level security') || message.includes('forbidden')) {
+        throw new Error('Supabase blocked bracket creation because the matches table write policy is not allowing inserts. Run the SQL policy fix in Supabase, then try again.');
+      }
+      throw insertError;
     }
 
-    // Notify registered approved players
-    approvedRegs.forEach(reg => {
-      simulator.addNotification(
-        reg.player_id, 
-        'Bracket Generated!', 
-        'The tournament bracket has been created! Check your assigned matches.', 
-        `/tournaments/${tournamentId}`
-      );
-    });
+    await supabase
+      .from('tournaments')
+      .update({ status: 'active', auto_lock_registration: true, updated_at: new Date().toISOString() })
+      .eq('id', tournamentId);
 
-    return matchesToInsert;
+    const notificationsToInsert = playerIds.map(playerId => ({
+      user_id: playerId,
+      title: 'Bracket Generated!',
+      content: 'The tournament bracket has been created. Check your assigned matches.',
+      link: `/tournaments/${tournamentId}`,
+      is_read: false
+    }));
+
+    if (notificationsToInsert.length) {
+      await supabase.from('notifications').insert(notificationsToInsert);
+    }
+
+    return (insertedMatches || matchesToInsert) as Match[];
   },
 
-  // Match Result Submission & Verification
   submitMatchResult: async (matchId: string, player1_score: number, player2_score: number, proofUrl: string, submittedBy: string): Promise<MatchResult> => {
-    if (isSupabaseConfigured && supabase) {
+    assertSupabase();
+
+    const { data: existing } = await supabase
+      .from('match_results')
+      .select('*')
+      .eq('match_id', matchId)
+      .eq('submitted_by', submittedBy)
+      .maybeSingle();
+
+    let result;
+
+    if (existing) {
+      const { data, error } = await supabase
+        .from('match_results')
+        .update({
+          player1_score,
+          player2_score,
+          proof_url: proofUrl,
+          status: 'pending',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id)
+        .select()
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) throw new Error('The score report update could not be saved.');
+      result = data;
+    } else {
       const { data, error } = await supabase
         .from('match_results')
         .insert([{ match_id: matchId, player1_score, player2_score, proof_url: proofUrl, submitted_by: submittedBy, status: 'pending' }])
         .select()
-        .single();
-      if (!error && data) return data as MatchResult;
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) throw new Error('The score report could not be created.');
+      result = data;
     }
 
-    const newResult: MatchResult = {
-      id: Math.random().toString(36).substring(7),
-      match_id: matchId,
-      player1_score,
-      player2_score,
-      proof_url: proofUrl,
-      submitted_by: submittedBy,
-      status: 'pending',
-      created_at: new Date().toISOString()
-    };
+    const { data: match, error: matchError } = await supabase
+      .from('matches')
+      .update({ status: 'disputed', updated_at: new Date().toISOString() })
+      .eq('id', matchId)
+      .select()
+      .maybeSingle();
 
-    const list = simulator.matchResults;
-    const existingIdx = list.findIndex(r => r.match_id === matchId && r.submitted_by === submittedBy);
-    if (existingIdx >= 0) {
-      list[existingIdx] = newResult;
-    } else {
-      list.push(newResult);
-    }
-    simulator.matchResults = list;
+    if (matchError) throw matchError;
+    if (!match) throw new Error('The selected match could not be updated.');
 
-    // Update match status to disputed or stay pending verification
-    const matches = simulator.matches;
-    const mIdx = matches.findIndex(m => m.id === matchId);
-    if (mIdx >= 0) {
-      matches[mIdx].status = 'disputed'; // Flag for organizer approval
-      simulator.matches = matches;
+    if (match) {
+      const { data: tournament } = await supabase
+        .from('tournaments')
+        .select('title, organizer_id')
+        .eq('id', match.tournament_id)
+        .maybeSingle();
 
-      // Notify organizers
-      const tournament = simulator.tournaments.find(t => t.id === matches[mIdx].tournament_id);
       if (tournament) {
-        simulator.addNotification(
-          tournament.organizer_id,
-          'Match Result Submitted',
-          `A match score report has been submitted for match #${matches[mIdx].match_no} in "${tournament.title}". Verification required.`,
-          `/tournaments/${tournament.id}`
-        );
+        await supabase.from('notifications').insert({
+          user_id: tournament.organizer_id,
+          title: 'Match Result Submitted',
+          content: `A match score report has been submitted for match #${match.match_no} in "${tournament.title}". Verification required.`,
+          link: `/tournaments/${match.tournament_id}`,
+          is_read: false
+        });
       }
     }
 
-    simulator.earnAchievement(submittedBy, 'ac5'); // Veracious Reporter
-    simulator.addLog(submittedBy, 'SCORE_SUBMIT', `Submitted score reporting (${player1_score}-${player2_score})`);
+    await db.earnAchievement(submittedBy, 'Veracious Reporter');
 
-    return newResult;
+    await supabase.from('activity_logs').insert({
+      user_id: submittedBy,
+      action_type: 'SCORE_SUBMIT',
+      description: `Submitted score reporting (${player1_score}-${player2_score})`
+    });
+
+    return result as MatchResult;
   },
 
   verifyMatchResult: async (matchId: string, winnerId: string, p1Score: number, p2Score: number): Promise<Match> => {
-    if (isSupabaseConfigured && supabase) {
-      // Production database updates...
-    }
+    assertSupabase();
 
-    const matches = simulator.matches;
-    const mIdx = matches.findIndex(m => m.id === matchId);
-    if (mIdx >= 0) {
-      const match = matches[mIdx];
-      match.player1_score = p1Score;
-      match.player2_score = p2Score;
-      match.winner_id = winnerId;
-      match.status = 'completed';
-      match.updated_at = new Date().toISOString();
+    const { data: match, error: matchError } = await supabase
+      .from('matches')
+      .update({
+        player1_score: p1Score,
+        player2_score: p2Score,
+        winner_id: winnerId,
+        status: 'completed',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', matchId)
+      .select()
+      .maybeSingle();
 
-      // Log Winner Activity
-      simulator.addLog(winnerId, 'MATCH_WIN', `Won match against opponent`);
-      simulator.earnAchievement(winnerId, 'ac1'); // First Victory
+    if (matchError || !match) throw matchError || new Error('Failed to update match');
 
-      // Update players statistics
-      const p1 = match.player1_id;
-      const p2 = match.player2_id;
-      const tournament = simulator.tournaments.find(t => t.id === match.tournament_id);
-      
-      if (tournament) {
-        const stats = simulator.statistics;
-        const gameId = tournament.game_id;
+    await supabase.from('activity_logs').insert({
+      user_id: winnerId,
+      action_type: 'MATCH_WIN',
+      description: 'Won match against opponent'
+    });
 
-        const updateStats = (userId: string, won: boolean) => {
-          const sIdx = stats.findIndex(s => s.user_id === userId && s.game_id === gameId);
-          if (sIdx >= 0) {
-            stats[sIdx].matches_played += 1;
-            if (won) stats[sIdx].matches_won += 1;
-            else stats[sIdx].matches_lost += 1;
-            stats[sIdx].updated_at = new Date().toISOString();
-          } else {
-            stats.push({
-              id: Math.random().toString(36).substring(7),
-              user_id: userId,
-              game_id: gameId,
-              matches_played: 1,
-              matches_won: won ? 1 : 0,
-              matches_lost: won ? 0 : 1,
-              tournaments_played: 1,
-              tournaments_won: 0,
-              win_rate: won ? 100.0 : 0.0,
+    await db.earnAchievement(winnerId, 'First Victory');
+
+    const { data: tournament } = await supabase
+      .from('tournaments')
+      .select('game_id')
+      .eq('id', match.tournament_id)
+      .maybeSingle();
+
+    if (tournament) {
+      const updateStats = async (userId: string, won: boolean) => {
+        const { data: stats } = await supabase
+          .from('player_statistics')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('game_id', tournament.game_id)
+          .maybeSingle();
+
+        if (stats) {
+          await supabase
+            .from('player_statistics')
+            .update({
+              matches_played: (stats.matches_played || 0) + 1,
+              matches_won: (stats.matches_won || 0) + (won ? 1 : 0),
+              matches_lost: (stats.matches_lost || 0) + (won ? 0 : 1),
               updated_at: new Date().toISOString()
-            });
-          }
-        };
-
-        if (p1) updateStats(p1, winnerId === p1);
-        if (p2) updateStats(p2, winnerId === p2);
-        simulator.statistics = stats;
-      }
-
-      // If next match is assigned, advance the winner!
-      if (match.next_match_id) {
-        const nextIdx = matches.findIndex(m => m.id === match.next_match_id);
-        if (nextIdx >= 0) {
-          const nextMatch = matches[nextIdx];
-          
-          // Assign player to vacant slot
-          if (!nextMatch.player1_id) {
-            nextMatch.player1_id = winnerId;
-          } else if (!nextMatch.player2_id) {
-            nextMatch.player2_id = winnerId;
-          }
-
-          // If both slots now filled, set status to playing!
-          if (nextMatch.player1_id && nextMatch.player2_id) {
-            nextMatch.status = 'playing';
-          }
-          nextMatch.updated_at = new Date().toISOString();
-          matches[nextIdx] = nextMatch;
+            })
+            .eq('id', stats.id);
+        } else {
+          await supabase.from('player_statistics').insert({
+            user_id: userId,
+            game_id: tournament.game_id,
+            matches_played: 1,
+            matches_won: won ? 1 : 0,
+            matches_lost: won ? 0 : 1,
+            tournaments_played: 1,
+            tournaments_won: 0,
+            win_rate: won ? 100.0 : 0.0
+          });
         }
-      } else {
-        // No next match = Grand Finals match! Crown the champion!
-        if (tournament) {
-          await db.updateTournamentStatus(tournament.id, 'completed', winnerId);
-        }
-      }
+      };
 
-      matches[mIdx] = match;
-      simulator.matches = matches;
-
-      // Update match result approvals
-      const mResults = simulator.matchResults;
-      const rIdx = mResults.findIndex(r => r.match_id === matchId);
-      if (rIdx >= 0) {
-        mResults[rIdx].status = 'approved';
-        simulator.matchResults = mResults;
-      }
-
-      return match;
+      if (match.player1_id) await updateStats(match.player1_id, winnerId === match.player1_id);
+      if (match.player2_id) await updateStats(match.player2_id, winnerId === match.player2_id);
     }
-    throw new Error('Match not found');
+
+    if (match.next_match_id) {
+      const { data: nextMatch } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('id', match.next_match_id)
+        .maybeSingle();
+
+      if (nextMatch) {
+        const updates: any = { updated_at: new Date().toISOString() };
+        if (!nextMatch.player1_id) {
+          updates.player1_id = winnerId;
+        } else if (!nextMatch.player2_id) {
+          updates.player2_id = winnerId;
+        }
+        if ((nextMatch.player1_id || updates.player1_id) && (nextMatch.player2_id || updates.player2_id)) {
+          updates.status = 'playing';
+        }
+        await supabase.from('matches').update(updates).eq('id', match.next_match_id);
+      }
+    } else {
+      await db.updateTournamentStatus(match.tournament_id, 'completed', winnerId);
+    }
+
+    await supabase
+      .from('match_results')
+      .update({ status: 'approved', updated_at: new Date().toISOString() })
+      .eq('match_id', matchId);
+
+    if (winnerId && tournament?.game_id) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('username, avatar_url')
+        .eq('id', winnerId)
+        .maybeSingle();
+
+      await awardRankPoints(winnerId, tournament.game_id, 100, 'Verified match win', profile?.username, profile?.avatar_url);
+    }
+
+    return match as Match;
   },
 
-  // Leaderboard & Stats
+  createFriendChallenge: async (hostId: string, opponentName: string, gameId: string, title: string): Promise<FriendChallenge> => {
+    assertSupabase();
+    if (!isUuid(hostId)) throw new Error('Host id must be a valid UUID.');
+    if (!isUuid(gameId)) throw new Error('Game id must be a valid UUID.');
+
+    const { data, error } = await supabase
+      .from('friend_challenges')
+      .insert([{ host_id: hostId, opponent_name: opponentName, game_id: gameId, title: title || 'Friendly challenge', status: 'pending', integrity_status: 'pending' }])
+      .select()
+      .single();
+
+    if (error || !data) throw error || new Error('Failed to create friend challenge.');
+
+    await supabase.from('notifications').insert({
+      user_id: hostId,
+      title: 'Friend challenge created',
+      content: `You invited ${opponentName || 'a friend'} to a friendly match.`,
+      link: '/friends',
+      is_read: false
+    });
+
+    return data as FriendChallenge;
+  },
+
+  acceptFriendChallenge: async (challengeId: string, opponentId: string): Promise<FriendChallenge> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('friend_challenges')
+      .update({ status: 'accepted', opponent_id: opponentId, updated_at: new Date().toISOString() })
+      .eq('id', challengeId)
+      .select()
+      .single();
+
+    if (error || !data) throw error || new Error('Failed to accept friend challenge');
+    return data as FriendChallenge;
+  },
+
+  submitFriendChallengeResult: async (challengeId: string, userId: string, hostScore: number, opponentScore: number, proofUrl: string): Promise<FriendChallenge> => {
+    assertSupabase();
+
+    const { data: challenge, error } = await supabase
+      .from('friend_challenges')
+      .select('*')
+      .eq('id', challengeId)
+      .maybeSingle();
+
+    if (error || !challenge) throw error || new Error('Challenge not found');
+
+    const winnerId = hostScore > opponentScore ? challenge.host_id : opponentScore > hostScore ? challenge.opponent_id || challenge.host_id : undefined;
+    const updates: any = {
+      host_score: hostScore,
+      opponent_score: opponentScore,
+      proof_url: proofUrl,
+      updated_at: new Date().toISOString(),
+      status: 'accepted',
+      integrity_status: 'pending'
+    };
+
+    if (proofUrl && hostScore !== opponentScore && winnerId) {
+      updates.integrity_status = 'verified';
+      updates.points_awarded = 120;
+      updates.verified_by = userId;
+      updates.status = 'completed';
+      await awardRankPoints(winnerId, challenge.game_id, 120, 'Friendly match win');
+    } else {
+      updates.integrity_status = 'flagged';
+      updates.status = 'flagged';
+    }
+
+    const { data: updatedChallenge, error: updateError } = await supabase
+      .from('friend_challenges')
+      .update(updates)
+      .eq('id', challengeId)
+      .select()
+      .single();
+
+    if (updateError || !updatedChallenge) throw updateError || new Error('Failed to update challenge result');
+    return updatedChallenge as FriendChallenge;
+  },
+
+  getFriendChallenges: async (): Promise<FriendChallenge[]> => {
+    assertSupabase();
+    const { data, error } = await supabase.from('friend_challenges').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return data as FriendChallenge[];
+  },
+
+  getFriendships: async (userId: string): Promise<Friendship[]> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('friendships')
+      .select('*')
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+    return data as Friendship[];
+  },
+
+  sendFriendRequest: async (requesterId: string, addresseeId: string): Promise<Friendship> => {
+    assertSupabase();
+    if (requesterId === addresseeId) throw new Error('You cannot add yourself as a friend.');
+
+    const requesterA = requesterId < addresseeId ? requesterId : addresseeId;
+    const addresseeA = requesterId < addresseeId ? addresseeId : requesterId;
+
+    const { data: existing, error: existingError } = await supabase
+      .from('friendships')
+      .select('*')
+      .eq('requester_id', requesterA)
+      .eq('addressee_id', addresseeA)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (existing) return existing as Friendship;
+
+    const { data, error } = await supabase
+      .from('friendships')
+      .insert([{ requester_id: requesterA, addressee_id: addresseeA, status: 'pending' }])
+      .select()
+      .single();
+
+    if (error || !data) throw error || new Error('Failed to send friend request.');
+
+    await supabase.from('notifications').insert({
+      user_id: addresseeId,
+      title: 'New friend request',
+      content: 'A player wants to add you as a friend.',
+      link: '/friends',
+      is_read: false
+    });
+
+    return data as Friendship;
+  },
+
+  updateFriendshipStatus: async (friendshipId: string, status: Friendship['status']): Promise<Friendship> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('friendships')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', friendshipId)
+      .select()
+      .single();
+    if (error || !data) throw error || new Error('Failed to update friend request.');
+    return data as Friendship;
+  },
+
+  removeFriendship: async (friendshipId: string): Promise<void> => {
+    assertSupabase();
+    const { error } = await supabase.from('friendships').delete().eq('id', friendshipId);
+    if (error) throw error;
+  },
+
   getLeaderboard: async (gameId: string): Promise<Leaderboard[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('leaderboards')
-        .select('*, profiles(username, avatar_url)')
-        .eq('game_id', gameId)
-        .order('rank_points', { ascending: false });
-      if (data) {
-        return data.map((item: any) => ({
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('leaderboards')
+      .select('*, profiles(username, avatar_url)')
+      .eq('game_id', gameId)
+      .order('rank_points', { ascending: false });
+
+    if (error) throw error;
+    return (data || []).map((item: any) => ({
+      ...item,
+      username: item.profiles?.username,
+      avatar_url: item.profiles?.avatar_url
+    })) as Leaderboard[];
+  },
+
+  getTournamentLeaderboard: async (tournamentId: string): Promise<Leaderboard[]> => {
+    assertSupabase();
+    const tournament = await db.getTournament(tournamentId);
+    if (!tournament) return [];
+
+    const { data: playerIdsData, error: playersError } = await supabase
+      .from('tournament_players')
+      .select('player_id')
+      .eq('tournament_id', tournamentId)
+      .eq('status', 'approved');
+
+    if (playersError) throw playersError;
+
+    const playerIds = (playerIdsData || []).map((p: any) => p.player_id);
+    if (!playerIds.length) return [];
+
+    const { data, error } = await supabase
+      .from('leaderboards')
+      .select('*, profiles(username, avatar_url)')
+      .in('user_id', playerIds)
+      .eq('game_id', tournament.game_id)
+      .order('rank_points', { ascending: false });
+
+    if (error) throw error;
+    return (data || []).map((item: any) => ({
+      ...item,
+      username: item.profiles?.username,
+      avatar_url: item.profiles?.avatar_url
+    })) as Leaderboard[];
+  },
+
+  getOverallLeaderboard: async (): Promise<Leaderboard[]> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('leaderboards')
+      .select('*, profiles(username, avatar_url)');
+
+    if (error) throw error;
+
+    const grouped = new Map<string, Leaderboard>();
+    for (const item of (data || []) as any[]) {
+      const existing = grouped.get(item.user_id);
+      if (existing) {
+        existing.rank_points += item.rank_points;
+      } else {
+        grouped.set(item.user_id, {
           ...item,
+          game_id: 'overall',
           username: item.profiles?.username,
           avatar_url: item.profiles?.avatar_url
-        })) as Leaderboard[];
+        } as Leaderboard);
       }
     }
-    return simulator.leaderboards
-      .filter(l => l.game_id === gameId)
-      .sort((a, b) => b.rank_points - a.rank_points);
+    return Array.from(grouped.values()).sort((a, b) => b.rank_points - a.rank_points);
   },
 
   getPlayerStats: async (userId: string): Promise<PlayerStatistics[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('player_statistics')
-        .select('*')
-        .eq('user_id', userId);
-      if (data) return data as PlayerStatistics[];
-    }
-    return simulator.statistics.filter(s => s.user_id === userId);
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('player_statistics')
+      .select('*')
+      .eq('user_id', userId);
+    if (error) throw error;
+    return data as PlayerStatistics[];
   },
 
-  // Notifications
   getNotifications: async (userId: string): Promise<Notification[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-      if (data) return data as Notification[];
-    }
-    return simulator.notifications.filter(n => n.user_id === userId);
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data as Notification[];
   },
 
   markNotificationAsRead: async (id: string): Promise<void> => {
-    if (isSupabaseConfigured && supabase) {
-      await supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('id', id);
-    }
-    const list = simulator.notifications;
-    const idx = list.findIndex(n => n.id === id);
-    if (idx >= 0) {
-      list[idx].is_read = true;
-      simulator.notifications = list;
-    }
+    assertSupabase();
+    await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', id);
   },
 
-  // Achievements
   getAchievements: async (): Promise<Achievement[]> => {
-    return simulator.achievements;
+    assertSupabase();
+    const { data, error } = await supabase.from('achievements').select('*');
+    if (error) throw error;
+    return data as Achievement[];
   },
 
   getUserAchievements: async (userId: string): Promise<UserAchievement[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('user_achievements')
-        .select('*')
-        .eq('user_id', userId);
-      if (data) return data as UserAchievement[];
-    }
-    // Filter simulator list
-    const earned = simulator.userAchievements.filter(ua => ua.user_id === userId);
-    return earned.map(e => ({
-      id: Math.random().toString(36).substring(7),
-      user_id: e.user_id,
-      achievement_id: e.achievement_id,
-      earned_at: e.earned_at
-    }));
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('user_achievements')
+      .select('*')
+      .eq('user_id', userId);
+    if (error) throw error;
+    return data as UserAchievement[];
   },
 
-  // Settings
   getSettings: async (userId: string): Promise<Settings> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('settings')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-      if (data) return data as Settings;
-    }
-    return simulator.settings;
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('settings')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+    if (error) throw error;
+    return data as Settings;
   },
 
   updateSettings: async (userId: string, updates: Partial<Settings>): Promise<Settings> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('settings')
-        .update(updates)
-        .eq('user_id', userId)
-        .select()
-        .single();
-      if (data) return data as Settings;
-    }
-    const current = simulator.settings;
-    const updated = { ...current, ...updates };
-    simulator.settings = updated;
-    return updated;
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('settings')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error || !data) throw error || new Error('Failed to update settings');
+    return data as Settings;
   },
 
-  // Activity Logs
   getActivityLogs: async (userId: string): Promise<ActivityLog[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('activity_logs')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-      if (data) return data as ActivityLog[];
-    }
-    return simulator.logs.filter(l => l.user_id === userId);
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('activity_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data as ActivityLog[];
   },
 
-  // Chat Feature
   getChatMessages: async (tournamentId: string): Promise<ChatMessage[]> => {
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('chats')
-        .select('*')
-        .eq('tournament_id', tournamentId)
-        .order('created_at', { ascending: true });
-      if (data) return data as ChatMessage[];
-    }
-    return simulator.chatMessages.filter(msg => msg.tournament_id === tournamentId);
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('chats')
+      .select('*')
+      .eq('tournament_id', tournamentId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data as ChatMessage[];
   },
 
   sendChatMessage: async (tournamentId: string, userId: string, username: string, avatarUrl: string, content: string): Promise<ChatMessage> => {
-    const newMessage: ChatMessage = {
-      id: Math.random().toString(36).substring(7),
-      tournament_id: tournamentId,
-      user_id: userId,
-      username,
-      avatar_url: avatarUrl,
-      content,
-      created_at: new Date().toISOString()
-    };
+    assertSupabase();
 
-    if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
-        .from('chats')
-        .insert([newMessage])
-        .select()
-        .single();
-      if (data) return data as ChatMessage;
+    const dmParticipants = getDmParticipantIds(tournamentId);
+    if (dmParticipants.length === 2) {
+      if (!dmParticipants.includes(userId)) {
+        throw new Error('You are not a participant in this DM.');
+      }
+
+      const recipientId = dmParticipants.find(id => id !== userId)!;
+      const { data: recipientSettings, error: settingsError } = await supabase
+        .from('settings')
+        .select('allow_dms')
+        .eq('user_id', recipientId)
+        .maybeSingle();
+
+      if (settingsError) throw settingsError;
+      const canDm = recipientSettings?.allow_dms !== false || await usersAreFriends(userId, recipientId);
+      if (!canDm) {
+        throw new Error('This player only accepts DMs from friends.');
+      }
     }
 
-    // simulator fallback
-    const list = simulator.chatMessages;
-    list.push(newMessage);
-    simulator.chatMessages = list;
-    return newMessage;
+    const { data, error } = await supabase
+      .from('chats')
+      .insert([{ tournament_id: tournamentId, user_id: userId, username, avatar_url: avatarUrl, content }])
+      .select()
+      .single();
+    if (error || !data) throw error || new Error('Failed to send chat message');
+    return data as ChatMessage;
+  },
+
+  markChatRead: async (channelId: string, userId: string): Promise<void> => {
+    assertSupabase();
+    await supabase
+      .from('chat_reads')
+      .upsert({
+        channel_id: channelId,
+        user_id: userId,
+        last_read_at: new Date().toISOString()
+      }, { onConflict: 'channel_id,user_id' });
+  },
+
+  getUnreadDmCount: async (userId: string): Promise<number> => {
+    assertSupabase();
+
+    const { data: reads, error: readsError } = await supabase
+      .from('chat_reads')
+      .select('channel_id, last_read_at')
+      .eq('user_id', userId);
+    if (readsError) throw readsError;
+
+    const readMap = new Map((reads || []).map((read: any) => [read.channel_id, read.last_read_at]));
+    const { data: messages, error: messagesError } = await supabase
+      .from('chats')
+      .select('tournament_id, created_at, user_id')
+      .neq('user_id', userId)
+      .like('tournament_id', `dm:%${userId}%`);
+
+    if (messagesError) throw messagesError;
+
+    return (messages || []).filter((message: any) => {
+      const participants = getDmParticipantIds(message.tournament_id);
+      if (!participants.includes(userId)) return false;
+      const lastReadAt = readMap.get(message.tournament_id);
+      return !lastReadAt || new Date(message.created_at).getTime() > new Date(lastReadAt).getTime();
+    }).length;
   }
 };

@@ -2,16 +2,20 @@ import { useState, useEffect } from 'react';
 import { 
   Trophy, Search, Filter, Calendar, Users, Award, Shield, 
   ChevronRight, ArrowLeft, Gamepad2, PlusCircle, CheckCircle, 
-  HelpCircle, Eye, AlertCircle, Sparkles, Upload, MessageSquare
+  HelpCircle, Eye, AlertCircle, Sparkles, Upload, MessageSquare, Coins
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
   Tournament, Game, Profile, TournamentPlayer, Match, 
-  TournamentStatus, TournamentFormat, PlayerRegistrationStatus 
+  TournamentStatus, TournamentFormat, PlayerRegistrationStatus, TournamentRosterCount
 } from '../types';
 import { db } from '../services/db';
+import { supabase, isSupabaseConfigured } from '../supabase';
 import BracketTree from './BracketTree';
 import ChatBox from './ChatBox';
+
+const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 interface TournamentsViewProps {
   currentUser: Profile;
@@ -36,9 +40,16 @@ export default function TournamentsView({
   const [search, setSearch] = useState('');
   const [selectedGameFilter, setSelectedGameFilter] = useState<string>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
+  const [showRegistrationModal, setShowRegistrationModal] = useState(false);
+  const [registrationForm, setRegistrationForm] = useState({ display_name: '', email: '', region: '', team_name: '', notes: '' });
+  const [registrationMessage, setRegistrationMessage] = useState<string | null>(null);
+  const [pendingPaymentRegistrationId, setPendingPaymentRegistrationId] = useState<string | null>(null);
+  const [paymentReferenceInput, setPaymentReferenceInput] = useState('');
+  const [quickDmRecipientId, setQuickDmRecipientId] = useState<string | null>(null);
 
   // Active Tournament Detail States
   const [registrations, setRegistrations] = useState<TournamentPlayer[]>([]);
+  const [rosterCounts, setRosterCounts] = useState<TournamentRosterCount[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [detailTab, setDetailTab] = useState<'overview' | 'registrations' | 'bracket' | 'chat'>('overview');
   
@@ -51,14 +62,46 @@ export default function TournamentsView({
   const [p1ReportScore, setP1ReportScore] = useState<number>(0);
   const [p2ReportScore, setP2ReportScore] = useState<number>(0);
   const [proofUrlInput, setProofUrlInput] = useState<string>('');
+  const [proofFile, setProofFile] = useState<File | null>(null);
   const [submittingScore, setSubmittingScore] = useState(false);
+  const [hostForm, setHostForm] = useState({
+    title: '',
+    description: '',
+    game_id: games[0]?.id || '',
+    banner_url: '',
+    max_players: '8',
+    format: 'single_elimination' as TournamentFormat,
+    prize_pool: '',
+    rules: '',
+    start_time: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+    entry_fee: '0',
+    payment_provider: 'none' as 'none' | 'paystack',
+    registration_note: '',
+    auto_lock_registration: true,
+    points_only: false
+  });
 
   // Fetch detail information when selected tournament changes
   useEffect(() => {
-    if (selectedTournamentId) {
+    if (isUuid(selectedTournamentId)) {
       loadTournamentDetails(selectedTournamentId);
+    } else {
+      setRegistrations([]);
+      setMatches([]);
     }
-  }, [selectedTournamentId]);
+  }, [selectedTournamentId, tournaments]);
+
+  useEffect(() => {
+    db.getRosterCounts()
+      .then(setRosterCounts)
+      .catch(err => console.error('Failed to load roster counts:', err));
+  }, [tournaments]);
+
+  useEffect(() => {
+    if (games.length && !hostForm.game_id) {
+      setHostForm(prev => ({ ...prev, game_id: games[0].id }));
+    }
+  }, [games, hostForm.game_id]);
 
   const loadTournamentDetails = async (tId: string) => {
     try {
@@ -68,6 +111,16 @@ export default function TournamentsView({
       ]);
       setRegistrations(regsData);
       setMatches(matchesData);
+      setRosterCounts(prev => {
+        const next = prev.filter(item => item.tournament_id !== tId);
+        next.push({
+          tournament_id: tId,
+          total: regsData.length,
+          approved: regsData.filter(reg => reg.status === 'approved').length,
+          pending: regsData.filter(reg => reg.status === 'pending').length
+        });
+        return next;
+      });
     } catch (err) {
       console.error('Error loading tournament details:', err);
     }
@@ -85,19 +138,160 @@ export default function TournamentsView({
   const activeTournament = tournaments.find(t => t.id === selectedTournamentId);
   const isRegistered = registrations.some(r => r.player_id === currentUser.id);
   const myRegistration = registrations.find(r => r.player_id === currentUser.id);
+  const activeRosterCount = activeTournament
+    ? rosterCounts.find(count => count.tournament_id === activeTournament.id) || {
+        tournament_id: activeTournament.id,
+        total: registrations.length,
+        approved: registrations.filter(reg => reg.status === 'approved').length,
+        pending: registrations.filter(reg => reg.status === 'pending').length
+      }
+    : undefined;
+  const activeApprovedCount = activeRosterCount?.approved || 0;
+  const activePendingCount = activeRosterCount?.pending || 0;
+  const activeReservedCount = activeApprovedCount + activePendingCount;
+  const activeIsFull = Boolean(activeTournament && activeReservedCount >= activeTournament.max_players);
+  const isActiveHost = Boolean(activeTournament && activeTournament.organizer_id === currentUser.id);
+  const canManageActiveTournament = Boolean(activeTournament && (currentUser.role === 'admin' || isActiveHost));
 
-  // Player registration action
-  const handleRegister = async () => {
+  const getProfileDisplayName = (profile?: Profile | null, fallback?: string) => {
+    const candidate = profile?.username?.trim() || fallback?.trim();
+    return candidate || 'Player';
+  };
+
+  const formatDateTime = (value?: string) => {
+    if (!value) return 'TBD';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'TBD' : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  };
+
+  const approvedMembers = registrations.filter(reg => reg.status === 'approved' && reg.player_id !== currentUser.id);
+  const currentUserMatch = [...matches]
+    .filter(match => match.status !== 'completed' && (match.player1_id === currentUser.id || match.player2_id === currentUser.id))
+    .sort((a, b) => a.round_no - b.round_no || a.match_no - b.match_no)[0];
+  const upcomingMatch = currentUserMatch || [...matches]
+    .filter(match => match.status !== 'completed')
+    .sort((a, b) => a.round_no - b.round_no || a.match_no - b.match_no)[0];
+
+  const openChatWithMember = (recipientId: string) => {
+    setQuickDmRecipientId(recipientId);
+    setDetailTab('chat');
+  };
+
+  const uploadProofToSupabase = async (file: File) => {
+    if (!supabase || !isSupabaseConfigured) {
+      throw new Error('Supabase storage is not configured. Please paste a public proof URL instead.');
+    }
+
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+    const fileName = `${currentUser.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error } = await supabase.storage.from('proof-screenshots').upload(fileName, file, {
+      cacheControl: '3600',
+      upsert: false
+    });
+
+    if (error) throw error;
+
+    const { data: publicData } = supabase.storage.from('proof-screenshots').getPublicUrl(fileName);
+    return publicData.publicUrl;
+  };
+
+  const openRegistrationModal = () => {
     if (!selectedTournamentId) return;
+    if (activeTournament?.organizer_id === currentUser.id) {
+      setRegistrationMessage('The tournament host cannot join their own tournament as a competitor.');
+      return;
+    }
+    if (activeIsFull) {
+      setRegistrationMessage('This tournament is full.');
+      return;
+    }
+    setShowRegistrationModal(true);
+    setRegistrationMessage(null);
+    setPendingPaymentRegistrationId(null);
+    setPaymentReferenceInput('');
+    setRegistrationForm({
+      display_name: currentUser.username,
+      email: currentUser.email,
+      region: '',
+      team_name: '',
+      notes: ''
+    });
+  };
+
+  const handleRegister = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!selectedTournamentId) return;
+    if (activeTournament?.organizer_id === currentUser.id) {
+      setRegistrationMessage('The tournament host cannot join their own tournament as a competitor.');
+      return;
+    }
+    if (activeIsFull) {
+      setRegistrationMessage('This tournament is full.');
+      return;
+    }
+    if (!registrationForm.region?.trim()) {
+      setRegistrationMessage('Please enter your region or country before registering.');
+      return;
+    }
     setRegistering(true);
     try {
-      await db.registerPlayer(selectedTournamentId, currentUser.id);
+      const reg = await db.registerPlayer(selectedTournamentId, currentUser.id, registrationForm);
       await loadTournamentDetails(selectedTournamentId);
       onRefreshTournaments();
+      if (activeTournament?.entry_fee && activeTournament.entry_fee > 0 && reg.payment_status === 'pending') {
+        setPendingPaymentRegistrationId(reg.id);
+        setRegistrationMessage('Your spot is reserved. Complete the entry fee to secure approval.');
+      } else {
+        setRegistrationMessage('You are in. Your tournament spot is confirmed.');
+        setShowRegistrationModal(false);
+      }
     } catch (err: any) {
       alert(err.message || 'Registration failed.');
     } finally {
       setRegistering(false);
+    }
+  };
+
+  const handleConfirmPayment = async () => {
+    if (!pendingPaymentRegistrationId) return;
+    try {
+      await db.submitPaymentReference(pendingPaymentRegistrationId, paymentReferenceInput);
+      await loadTournamentDetails(selectedTournamentId!);
+      onRefreshTournaments();
+      setPendingPaymentRegistrationId(null);
+      setPaymentReferenceInput('');
+      setRegistrationMessage('Payment reference submitted. The host will verify it before approval.');
+      setShowRegistrationModal(false);
+    } catch (err: any) {
+      alert(err.message || 'Payment reference submission failed.');
+    }
+  };
+
+  const handleApprovePayment = async (regId: string, reference?: string) => {
+    setActionLoading(true);
+    try {
+      await db.markRegistrationPaid(regId, reference || '');
+      if (selectedTournamentId) await loadTournamentDetails(selectedTournamentId);
+      onRefreshTournaments();
+    } catch (err: any) {
+      alert(err.message || 'Payment approval failed.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRemovePlayer = async (regId: string, disqualify = false) => {
+    const reason = window.prompt(disqualify ? 'Reason for disqualification:' : 'Reason for removing this player:');
+    if (reason === null) return;
+    setActionLoading(true);
+    try {
+      await db.removeTournamentPlayer(regId, reason, disqualify);
+      if (selectedTournamentId) await loadTournamentDetails(selectedTournamentId);
+      onRefreshTournaments();
+    } catch (err: any) {
+      alert(err.message || 'Player action failed.');
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -106,6 +300,7 @@ export default function TournamentsView({
     setActionLoading(true);
     try {
       await db.approvePlayer(regId, status);
+      onRefreshTournaments();
       if (selectedTournamentId) {
         await loadTournamentDetails(selectedTournamentId);
       }
@@ -122,11 +317,14 @@ export default function TournamentsView({
     setActionLoading(true);
     try {
       await db.generateBracket(selectedTournamentId);
-      await loadTournamentDetails(selectedTournamentId);
       onRefreshTournaments();
+      await loadTournamentDetails(selectedTournamentId);
       setDetailTab('bracket');
     } catch (err: any) {
-      alert(err.message || 'Generating bracket failed.');
+      const message = err?.code === '42501' || err?.message?.toLowerCase().includes('row-level security') || err?.message?.toLowerCase().includes('forbidden')
+        ? 'Supabase blocked bracket creation because the matches table write policy is missing or your account is not the organizer/admin. Run supabase/fix_matches_rls.sql in the Supabase SQL Editor, sign in as the tournament organizer/admin, and try again.'
+        : err.message || 'Generating bracket failed.';
+      alert(message);
     } finally {
       setActionLoading(false);
     }
@@ -138,7 +336,13 @@ export default function TournamentsView({
     if (!selectedMatch) return;
     setSubmittingScore(true);
     try {
-      const finalProof = proofUrlInput.trim() || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600';
+      let finalProof = proofUrlInput.trim();
+      if (proofFile) {
+        finalProof = await uploadProofToSupabase(proofFile);
+      } else if (!finalProof) {
+        finalProof = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600';
+      }
+
       await db.submitMatchResult(
         selectedMatch.id,
         p1ReportScore,
@@ -146,10 +350,13 @@ export default function TournamentsView({
         finalProof,
         currentUser.id
       );
+      onRefreshTournaments();
       if (selectedTournamentId) {
         await loadTournamentDetails(selectedTournamentId);
       }
       setSelectedMatch(null);
+      setProofFile(null);
+      setProofUrlInput('');
       alert('Scorecard report submitted successfully. Waiting for organizer approval!');
     } catch (err: any) {
       alert(err.message || 'Score report failed.');
@@ -163,9 +370,9 @@ export default function TournamentsView({
     setActionLoading(true);
     try {
       const updatedMatch = await db.verifyMatchResult(matchId, winnerId, p1S, p2S);
+      onRefreshTournaments();
       if (selectedTournamentId) {
         await loadTournamentDetails(selectedTournamentId);
-        onRefreshTournaments();
       }
       
       // If no next_match_id exists, this was the Grand Finals! Crown champion!
@@ -186,6 +393,8 @@ export default function TournamentsView({
   };
 
   const getGameName = (id: string) => games.find(g => g.id === id)?.name || 'Esports Match';
+  const getDisplayName = (profile?: Profile) => profile?.username || 'Unknown Competitor';
+  const getDisplayEmail = (profile?: Profile) => profile?.show_email ? profile.email : 'Hidden by privacy';
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -249,19 +458,14 @@ export default function TournamentsView({
           </div>
 
           {/* Tournaments Grid */}
-          {filteredTournaments.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-gray-800 p-12 text-center space-y-4">
-              <HelpCircle className="h-10 w-10 text-gray-600 mx-auto" />
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-gray-300">No Tournaments Found</h3>
-                <p className="text-xs text-gray-500">Try loosening your search filters or start hosting one yourself.</p>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {filteredTournaments.map((t) => {
-                const game = games.find(g => g.id === t.game_id);
-                const approvedCount = registrations.filter(r => r.tournament_id === t.id && r.status === 'approved').length;
+          {filteredTournaments.map(t => {
+            const game = games.find(g => g.id === t.game_id);
+            const count = rosterCounts.find(item => item.tournament_id === t.id);
+            const approvedCount = count?.approved || 0;
+            const pendingCount = count?.pending || 0;
+            const reservedCount = approvedCount + pendingCount;
+            const isFull = reservedCount >= t.max_players;
+                const isHost = t.organizer_id === currentUser.id;
 
                 return (
                   <div 
@@ -278,7 +482,9 @@ export default function TournamentsView({
                         referrerPolicy="no-referrer"
                       />
                       <span className={`absolute top-3 right-3 text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-full border backdrop-blur-md ${
-                        t.status === 'registration' 
+                        isFull && t.status === 'registration'
+                          ? 'bg-red-500/10 text-red-300 border-red-500/20'
+                          : t.status === 'registration' 
                           ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' 
                           : t.status === 'active' 
                           ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' 
@@ -286,8 +492,13 @@ export default function TournamentsView({
                           ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
                           : 'bg-zinc-800 text-zinc-500 border-white/5'
                       }`}>
-                        {t.status}
+                        {isFull && t.status === 'registration' ? 'full' : t.status}
                       </span>
+                      {isHost && (
+                        <span className="absolute top-3 left-3 text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-full border bg-amber-500/10 text-amber-300 border-amber-500/20 backdrop-blur-md">
+                          Host
+                        </span>
+                      )}
                     </div>
 
                     {/* Content */}
@@ -302,7 +513,7 @@ export default function TournamentsView({
                       <div className="pt-3 border-t border-white/5 flex items-center justify-between text-xs text-zinc-400">
                         <div className="flex items-center gap-1.5">
                           <Users className="h-3.5 w-3.5 text-zinc-500" />
-                          <span>Max: {t.max_players}</span>
+                          <span>{reservedCount}/{t.max_players}</span>
                         </div>
                         <div className="flex items-center gap-1">
                           <Trophy className="h-3.5 w-3.5 text-cyan-500/80" />
@@ -314,8 +525,8 @@ export default function TournamentsView({
                 );
               })}
             </div>
-          )}
-        </div>
+          
+      
       ) : selectedTournamentId === 'new' ? (
         
         // CREATE NEW TOURNAMENT INTERFACE (ORGANIZER ONLY)
@@ -334,21 +545,25 @@ export default function TournamentsView({
                 <PlusCircle className="h-5 w-5 text-cyan-400" />
                 Host Custom Tournament Arena
               </h2>
-              <p className="text-xs text-gray-400 mt-1">Configure your game titles, brackets sizes, and regional cash prizes.</p>
+              <p className="text-xs text-gray-400 mt-1">Configure your game titles, bracket sizes, entry fees, and points-only rewards.</p>
             </div>
 
             <form onSubmit={async (e) => {
               e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              const title = fd.get('title') as string;
-              const description = fd.get('description') as string;
-              const game_id = fd.get('game_id') as string;
-              const banner_url = fd.get('banner_url') as string;
-              const max_players = Number(fd.get('max_players'));
-              const format = fd.get('format') as TournamentFormat;
-              const prize_pool = fd.get('prize_pool') as string;
-              const rules = fd.get('rules') as string;
-              const start_time = fd.get('start_time') as string;
+              const title = hostForm.title.trim();
+              const description = hostForm.description.trim();
+              const game_id = hostForm.game_id;
+              const banner_url = hostForm.banner_url.trim();
+              const max_players = Number(hostForm.max_players);
+              const format = hostForm.format;
+              const prize_pool = hostForm.prize_pool.trim();
+              const rules = hostForm.rules.trim();
+              const start_time = hostForm.start_time;
+              const entry_fee = Number(hostForm.entry_fee || 0);
+              const payment_provider = hostForm.payment_provider || 'none';
+              const registration_note = hostForm.registration_note.trim();
+              const auto_lock_registration = hostForm.auto_lock_registration;
+              const points_only = hostForm.points_only;
 
               if (!title || !description || !game_id || !start_time) {
                 alert('Please fill out all required fields.');
@@ -361,14 +576,18 @@ export default function TournamentsView({
                   title,
                   description,
                   game_id,
-                  organizer_id: currentUser.id,
                   banner_url: banner_url || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800',
                   max_players,
-                  status: 'registration', // start directly in registration
+                  status: 'registration',
                   start_time: new Date(start_time).toISOString(),
                   format,
                   prize_pool,
-                  rules
+                  rules,
+                  entry_fee,
+                  payment_provider,
+                  registration_note,
+                  auto_lock_registration,
+                  points_only
                 });
                 onRefreshTournaments();
                 setSelectedTournamentId(created.id);
@@ -382,57 +601,94 @@ export default function TournamentsView({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Tournament Title *</label>
-                  <input required name="title" type="text" placeholder="e.g. eFootball Sunday Clash" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
+                  <input required value={hostForm.title} onChange={(e) => setHostForm({ ...hostForm, title: e.target.value })} name="title" type="text" placeholder="e.g. eFootball Sunday Clash" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Esports Game *</label>
-                  <select name="game_id" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50">
-                    {games.map(g => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
-                    ))}
+                  <select name="game_id" value={hostForm.game_id} onChange={(e) => setHostForm({ ...hostForm, game_id: e.target.value })} className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50" disabled={games.length === 0}>
+                    {games.length === 0 ? (
+                      <option value="" disabled>No games loaded - refresh after Supabase sync</option>
+                    ) : (
+                      games.map(g => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))
+                    )}
                   </select>
+                  {games.length === 0 && (
+                    <p className="text-[11px] text-amber-300">The game list is empty, so tournament hosting is paused until games load.</p>
+                  )}
                 </div>
               </div>
 
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-gray-400">Description Summary *</label>
-                <textarea required name="description" rows={2} placeholder="Write high-level introduction of the tournament bracket..." className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
+                <textarea required value={hostForm.description} onChange={(e) => setHostForm({ ...hostForm, description: e.target.value })} name="description" rows={2} placeholder="Write high-level introduction of the tournament bracket..." className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Banner Image URL</label>
-                  <input name="banner_url" type="url" placeholder="e.g. https://images.unsplash.com/..." className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
+                  <input value={hostForm.banner_url} onChange={(e) => setHostForm({ ...hostForm, banner_url: e.target.value })} name="banner_url" type="url" placeholder="e.g. https://images.unsplash.com/..." className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Launch Start Time *</label>
-                  <input required name="start_time" type="datetime-local" defaultValue="2026-07-01T18:00" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50" />
+                  <input required value={hostForm.start_time} onChange={(e) => setHostForm({ ...hostForm, start_time: e.target.value })} name="start_time" type="datetime-local" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50" />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Bracket Size *</label>
-                  <select name="max_players" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50">
+                  <select name="max_players" value={hostForm.max_players} onChange={(e) => setHostForm({ ...hostForm, max_players: e.target.value })} className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50">
                     <option value="8">8 Players (Single Elimination)</option>
                     <option value="4">4 Players (Single Elimination)</option>
                   </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Tournament Format</label>
-                  <select name="format" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50">
+                  <select name="format" value={hostForm.format} onChange={(e) => setHostForm({ ...hostForm, format: e.target.value as TournamentFormat })} className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50">
                     <option value="single_elimination">Single Elimination</option>
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-gray-400">Prize Pool Description *</label>
-                  <input required name="prize_pool" type="text" placeholder="e.g. $1,000 USD + Badges" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
+                  <label className="text-xs font-semibold text-gray-400">Prize Pool / Award</label>
+                  <input value={hostForm.prize_pool} onChange={(e) => setHostForm({ ...hostForm, prize_pool: e.target.value })} name="prize_pool" type="text" placeholder="Optional; e.g. $1,000 USD + Badges" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-400">Entry Fee (USD)</label>
+                  <input value={hostForm.entry_fee} onChange={(e) => setHostForm({ ...hostForm, entry_fee: e.target.value })} name="entry_fee" type="number" min="0" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-400">Payment Provider</label>
+                  <select name="payment_provider" value={hostForm.payment_provider} onChange={(e) => setHostForm({ ...hostForm, payment_provider: e.target.value as 'none' | 'paystack' })} className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50">
+                    <option value="none">No payment</option>
+                    <option value="paystack">Paystack-ready</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label className="flex items-center gap-2 rounded-xl border border-white/5 bg-zinc-900/50 px-3 py-2 text-xs text-zinc-300">
+                  <input checked={hostForm.points_only} onChange={(e) => setHostForm({ ...hostForm, points_only: e.target.checked })} name="points_only" type="checkbox" className="h-4 w-4 rounded border-white/10 bg-transparent" />
+                  Points-only tournament (no prize pool needed)
+                </label>
+                <label className="flex items-center gap-2 rounded-xl border border-white/5 bg-zinc-900/50 px-3 py-2 text-xs text-zinc-300">
+                  <input checked={hostForm.auto_lock_registration} onChange={(e) => setHostForm({ ...hostForm, auto_lock_registration: e.target.checked })} name="auto_lock_registration" type="checkbox" className="h-4 w-4 rounded border-white/10 bg-transparent" />
+                  Auto-lock registration on start
+                </label>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-400">Registration Note</label>
+                <input value={hostForm.registration_note} onChange={(e) => setHostForm({ ...hostForm, registration_note: e.target.value })} name="registration_note" type="text" placeholder="Optional message for players" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
               </div>
 
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-gray-400">Arena Rules & Guidelines</label>
-                <textarea name="rules" rows={3} placeholder="1. Match play duration is 10 min.&#10;2. Submit screenshots of final match scores scorecard within 15 min." className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
+                <textarea value={hostForm.rules} onChange={(e) => setHostForm({ ...hostForm, rules: e.target.value })} name="rules" rows={3} placeholder="1. Match play duration is 10 min.&#10;2. Submit screenshots of final match scores scorecard within 15 min." className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
               </div>
 
               <div className="pt-2 flex justify-end gap-3">
@@ -472,7 +728,7 @@ export default function TournamentsView({
                   className="w-full h-full object-cover opacity-80"
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#161920] via-[#161920]/40 to-transparent" />
+                <div className="absolute inset-0 bg-linear-to-t from-[#161920] via-[#161920]/40 to-transparent" />
                 
                 {/* Title badge */}
                 <div className="absolute bottom-6 left-6 right-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -493,10 +749,15 @@ export default function TournamentsView({
                           <CheckCircle className="h-4 w-4" />
                           Joined ({myRegistration?.status || 'Pending'})
                         </div>
+                      ) : activeIsFull ? (
+                        <div className="flex items-center gap-1 px-4 py-2 bg-red-500/10 text-red-300 border border-red-500/25 rounded-xl text-xs font-bold">
+                          <AlertCircle className="h-4 w-4" />
+                          Tournament Full
+                        </div>
                       ) : (
                         <button
                           id="register-button"
-                          onClick={handleRegister}
+                          onClick={openRegistrationModal}
                           disabled={registering}
                           className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-black font-semibold rounded-xl text-xs shadow-lg shadow-cyan-500/20 transition-all hover:scale-103 cursor-pointer"
                         >
@@ -524,12 +785,15 @@ export default function TournamentsView({
               {/* Stat panel */}
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-4 p-5 border-t border-gray-850/60 bg-[#0F1115]/80 text-left">
                 <div className="space-y-0.5">
-                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Prize Pool</span>
-                  <p className="text-sm font-bold text-white">{activeTournament.prize_pool || '$500 USD'}</p>
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Reward</span>
+                  <p className="text-sm font-bold text-white">{activeTournament.points_only ? 'Points only' : activeTournament.prize_pool || '$500 USD'}</p>
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Bracket Size</span>
-                  <p className="text-sm font-bold text-white">{activeTournament.max_players} Players</p>
+                  <p className="text-sm font-bold text-white">{activeReservedCount}/{activeTournament.max_players} Slots</p>
+                  {activePendingCount > 0 && (
+                    <p className="text-[10px] text-amber-300">{activePendingCount} pending</p>
+                  )}
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Format</span>
@@ -579,6 +843,69 @@ export default function TournamentsView({
                     <p className="text-xs text-gray-400 leading-relaxed whitespace-pre-line">
                       {activeTournament.rules || 'No custom rules uploaded. Matches follow standard regional esports code of conduct.'}
                     </p>
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      {activeTournament.points_only && <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-300">Points-only rewards</span>}
+                      {activeTournament.entry_fee && activeTournament.entry_fee > 0 ? <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-300">Entry fee: ${activeTournament.entry_fee}</span> : <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-300">Free to join</span>}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-5 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-bold text-white text-sm">Members & Match Rhythm</h3>
+                        <p className="text-[11px] text-cyan-200/80">Keep the tournament moving with quick contact and clear timing.</p>
+                      </div>
+                      <span className="rounded-full border border-cyan-500/20 bg-[#08131a] px-2.5 py-1 text-[10px] font-semibold text-cyan-300">{approvedMembers.length} ready</span>
+                    </div>
+
+                    {upcomingMatch && (
+                      <div className="rounded-2xl border border-white/10 bg-[#0f141b]/80 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.25em] text-cyan-400">Next match</p>
+                            <p className="text-sm font-semibold text-white">
+                              {(() => {
+                                const opponentId = currentUser.id === upcomingMatch.player1_id ? upcomingMatch.player2_id : upcomingMatch.player1_id;
+                                const opponentProfile = profiles.find(profile => profile.id === opponentId);
+                                return currentUserMatch
+                                  ? `You vs ${getProfileDisplayName(opponentProfile)}`
+                                  : `${getProfileDisplayName(profiles.find(profile => profile.id === upcomingMatch.player1_id), 'TBD')} vs ${getProfileDisplayName(profiles.find(profile => profile.id === upcomingMatch.player2_id), 'TBD')}`;
+                              })()}
+                            </p>
+                            <p className="text-xs text-zinc-400">
+                              {upcomingMatch.scheduled_time ? `Scheduled ${formatDateTime(upcomingMatch.scheduled_time)}` : 'No time set yet — use chat to coordinate'}
+                            </p>
+                          </div>
+                          {(() => {
+                            const opponentId = currentUser.id === upcomingMatch.player1_id ? upcomingMatch.player2_id : upcomingMatch.player1_id;
+                            return opponentId ? (
+                              <button onClick={() => openChatWithMember(opponentId)} className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-300 transition-colors hover:bg-cyan-500/20">
+                                DM opponent
+                              </button>
+                            ) : null;
+                          })()}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      {approvedMembers.length === 0 ? (
+                        <p className="text-xs text-zinc-400">Approved members will appear here when the roster is locked in.</p>
+                      ) : (
+                        approvedMembers.slice(0, 5).map((reg) => {
+                          const profile = profiles.find((item) => item.id === reg.player_id);
+                          return (
+                            <button
+                              key={reg.id}
+                              onClick={() => openChatWithMember(reg.player_id)}
+                              className="rounded-full border border-white/10 bg-[#0b1117] px-3 py-1.5 text-[11px] font-semibold text-zinc-200 transition-colors hover:border-cyan-500/40 hover:text-cyan-300"
+                            >
+                              {getProfileDisplayName(profile, reg.display_name)}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -587,20 +914,27 @@ export default function TournamentsView({
                   <div className="rounded-xl border border-gray-800/80 bg-[#161920]/40 p-5 space-y-4">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Tournament Host</h3>
                     <div className="flex items-center gap-3">
+                      {(() => {
+                        const hostProfile = profiles.find(p => p.id === activeTournament.organizer_id);
+                        return (
+                          <>
                       <img 
-                        src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${activeTournament.organizer_id}`} 
+                        src={hostProfile?.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${activeTournament.organizer_id}`} 
                         className="h-9 w-9 rounded bg-gray-900"
                         alt=""
                       />
                       <div>
-                        <p className="text-xs font-bold text-white">Apex Tournament host</p>
-                        <p className="text-[10px] text-cyan-400 font-medium">Verified Organizer</p>
+                        <p className="text-xs font-bold text-white">{hostProfile?.username || 'Tournament host'}</p>
+                        <p className="text-[10px] text-amber-400 font-medium">Host</p>
                       </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 
                   {/* Organizer Quick Actions widget */}
-                  {(currentUser.role === 'organizer' || currentUser.role === 'admin') && activeTournament.status === 'registration' && (
+                  {canManageActiveTournament && activeTournament.status === 'registration' && (
                     <div className="rounded-xl border border-dashed border-cyan-500/20 bg-cyan-500/5 p-5 space-y-3 shadow-[0_0_15px_rgba(6,182,212,0.03)]">
                       <h3 className="text-xs font-extrabold text-cyan-400 uppercase tracking-widest flex items-center gap-1.5">
                         <Shield className="h-3.5 w-3.5" />
@@ -611,13 +945,16 @@ export default function TournamentsView({
                       </p>
                       <button
                         onClick={handleGenerateBracket}
-                        disabled={actionLoading || registrations.filter(r => r.status === 'approved').length < 2}
+                        disabled={actionLoading || activeApprovedCount < 2}
                         className="w-full py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 disabled:bg-gray-800 disabled:text-gray-500 text-black font-semibold rounded-lg text-xs transition-colors cursor-pointer"
                       >
                         {actionLoading ? 'Generating...' : 'Compile & Start Bracket'}
                       </button>
-                      {registrations.filter(r => r.status === 'approved').length < 2 && (
+                      {activeApprovedCount < 2 && (
                         <span className="text-[10px] text-yellow-500/80 block text-center">At least 2 approved players required</span>
+                      )}
+                      {activeIsFull && matches.length === 0 && (
+                        <span className="text-[10px] text-cyan-300 block text-center">Capacity reached. The bracket will compile automatically.</span>
                       )}
                     </div>
                   )}
@@ -652,10 +989,14 @@ export default function TournamentsView({
                             />
                             <div>
                               <p className="text-xs font-bold text-gray-200">
-                                {profile?.username || 'Unknown Competitor'}
+                                {getProfileDisplayName(profile)}
                                 {isMe && <span className="ml-1.5 text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-1.5 py-0.5 rounded-full font-semibold">You</span>}
+                                {activeTournament.organizer_id === reg.player_id && <span className="ml-1.5 text-[9px] bg-amber-500/10 text-amber-300 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-semibold">Host</span>}
                               </p>
-                              <p className="text-[10px] text-gray-500 truncate">{profile?.email || 'N/A'}</p>
+                              <p className="text-[10px] text-gray-500 truncate">{getDisplayEmail(profile)}</p>
+                              {reg.payment_reference && (
+                                <p className="text-[10px] text-amber-300 truncate">Payment ref: {reg.payment_reference}</p>
+                              )}
                             </div>
                           </div>
 
@@ -669,23 +1010,62 @@ export default function TournamentsView({
                             }`}>
                               {reg.status}
                             </span>
+                            {reg.payment_status && reg.payment_status !== 'free' && (
+                              <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
+                                reg.payment_status === 'paid'
+                                  ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                                  : 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                              }`}>
+                                {reg.payment_status}
+                              </span>
+                            )}
 
                             {/* Approval buttons for organizers/admins */}
-                            {(currentUser.role === 'organizer' || currentUser.role === 'admin') && reg.status === 'pending' && (
+                            {reg.player_id !== currentUser.id && (
+                              <button
+                                onClick={() => openChatWithMember(reg.player_id)}
+                                className="px-2.5 py-1 bg-white/5 hover:bg-cyan-500/10 text-zinc-300 font-semibold rounded-lg text-[10px] border border-white/10 transition-colors cursor-pointer"
+                              >
+                                DM
+                              </button>
+                            )}
+
+                            {canManageActiveTournament && reg.status === 'pending' && (
                               <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => handleApprovePlayer(reg.id, 'approved')}
-                                  disabled={actionLoading}
-                                  className="px-2.5 py-1 bg-cyan-500 hover:bg-cyan-400 text-black font-semibold rounded-lg text-[10px] transition-colors cursor-pointer"
-                                >
-                                  Approve
-                                </button>
+                                {activeTournament.entry_fee && activeTournament.entry_fee > 0 ? (
+                                  <button
+                                    onClick={() => handleApprovePayment(reg.id, reg.payment_reference)}
+                                    disabled={actionLoading || !reg.payment_reference}
+                                    className="px-2.5 py-1 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-black font-semibold rounded-lg text-[10px] transition-colors cursor-pointer"
+                                  >
+                                    Verify Pay
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleApprovePlayer(reg.id, 'approved')}
+                                    disabled={actionLoading}
+                                    className="px-2.5 py-1 bg-cyan-500 hover:bg-cyan-400 text-black font-semibold rounded-lg text-[10px] transition-colors cursor-pointer"
+                                  >
+                                    Approve
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleApprovePlayer(reg.id, 'rejected')}
                                   disabled={actionLoading}
                                   className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-semibold rounded-lg text-[10px] border border-red-500/20 transition-colors cursor-pointer"
                                 >
                                   Reject
+                                </button>
+                              </div>
+                            )}
+                            {canManageActiveTournament && reg.status === 'approved' && activeTournament.status !== 'completed' && reg.player_id !== activeTournament.organizer_id && (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => handleRemovePlayer(reg.id, activeTournament.status === 'active')}
+                                  disabled={actionLoading}
+                                  className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 font-semibold rounded-lg text-[10px] border border-red-500/20 transition-colors cursor-pointer"
+                                >
+                                  {activeTournament.status === 'active' ? 'DQ' : 'Remove'}
                                 </button>
                               </div>
                             )}
@@ -706,7 +1086,7 @@ export default function TournamentsView({
                     <Trophy className="h-8 w-8 text-gray-600 mx-auto" />
                     <h4 className="text-sm font-bold text-gray-300">Bracket has not been compiled yet</h4>
                     <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                      {(currentUser.role === 'organizer' || currentUser.role === 'admin') 
+                      {canManageActiveTournament 
                         ? 'Approve pending players in the "Competitors" tab and click "Compile & Start Bracket" to launch tournament matches.' 
                         : 'The organizer will compile the matchmaking bracket as soon as player registration concludes.'
                       }
@@ -717,6 +1097,35 @@ export default function TournamentsView({
                     <p className="text-[11px] text-gray-400 mb-4 bg-gray-950/20 border border-gray-850 p-3 rounded-lg">
                       💡 <strong>How to Play:</strong> Click on any match card below to see scheduling, report scores, or verify match results as an organizer.
                     </p>
+                    {upcomingMatch && (
+                      <div className="mb-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-left">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.25em] text-cyan-400">Match clock</p>
+                            <p className="text-sm font-semibold text-white">
+                              {(() => {
+                                const opponentId = currentUser.id === upcomingMatch.player1_id ? upcomingMatch.player2_id : upcomingMatch.player1_id;
+                                const opponentProfile = profiles.find(profile => profile.id === opponentId);
+                                return currentUserMatch
+                                  ? `You vs ${getProfileDisplayName(opponentProfile)}`
+                                  : `${getProfileDisplayName(profiles.find(profile => profile.id === upcomingMatch.player1_id), 'TBD')} vs ${getProfileDisplayName(profiles.find(profile => profile.id === upcomingMatch.player2_id), 'TBD')}`;
+                              })()}
+                            </p>
+                            <p className="text-xs text-zinc-400">
+                              {upcomingMatch.scheduled_time ? `Scheduled ${formatDateTime(upcomingMatch.scheduled_time)}` : 'Set a time, then DM your opponent'}
+                            </p>
+                          </div>
+                          {(() => {
+                            const opponentId = currentUser.id === upcomingMatch.player1_id ? upcomingMatch.player2_id : upcomingMatch.player1_id;
+                            return opponentId ? (
+                              <button onClick={() => openChatWithMember(opponentId)} className="rounded-full border border-cyan-500/30 bg-[#09131a] px-3 py-1.5 text-[11px] font-semibold text-cyan-300 transition-colors hover:bg-cyan-500/20">
+                                DM next opponent
+                              </button>
+                            ) : null;
+                          })()}
+                        </div>
+                      </div>
+                    )}
                     <BracketTree 
                       matches={matches} 
                       profiles={profiles} 
@@ -738,14 +1147,108 @@ export default function TournamentsView({
               <div className="space-y-4">
                 <ChatBox 
                   currentUser={currentUser} 
-                  tournamentId={activeTournament.id} 
-                  title={`${activeTournament.title} - Lobby Chat`} 
+                  tournamentId={activeTournament.id}
+                  profiles={profiles}
+                  hostId={activeTournament.organizer_id}
+                  defaultRecipientId={quickDmRecipientId || undefined}
+                  title="Tournament Chat" 
                 />
               </div>
             )}
 
           </div>
 
+        </div>
+      )}
+
+      {showRegistrationModal && activeTournament && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#0e1218]/95 p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.25em] text-cyan-400">Join the arena</p>
+                <h3 className="text-lg font-semibold text-white">{activeTournament.title}</h3>
+                <p className="mt-1 text-sm text-zinc-400">Share your details, join the bracket, and pay the entry fee if required.</p>
+              </div>
+              <button onClick={() => setShowRegistrationModal(false)} className="text-sm text-zinc-500">✕</button>
+            </div>
+
+            <form onSubmit={handleRegister} className="space-y-4 text-left">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Display name</label>
+                  <input value={registrationForm.display_name} onChange={(e) => setRegistrationForm({ ...registrationForm, display_name: e.target.value })} className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Email</label>
+                  <input type="email" value={registrationForm.email} onChange={(e) => setRegistrationForm({ ...registrationForm, email: e.target.value })} className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white" />
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Region / Country</label>
+                  <input
+                    required
+                    list="region-options"
+                    value={registrationForm.region}
+                    onChange={(e) => setRegistrationForm({ ...registrationForm, region: e.target.value })}
+                    placeholder="e.g. USA, Brazil, Nigeria"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white"
+                  />
+                  <datalist id="region-options">
+                    <option value="North America" />
+                    <option value="South America" />
+                    <option value="Europe" />
+                    <option value="Africa" />
+                    <option value="Asia" />
+                    <option value="Oceania" />
+                    <option value="United States" />
+                    <option value="Canada" />
+                    <option value="United Kingdom" />
+                    <option value="Brazil" />
+                    <option value="Nigeria" />
+                    <option value="India" />
+                    <option value="Australia" />
+                  </datalist>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Team / Tag</label>
+                  <input value={registrationForm.team_name} onChange={(e) => setRegistrationForm({ ...registrationForm, team_name: e.target.value })} className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white" />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Notes for the host</label>
+                <textarea rows={3} value={registrationForm.notes} onChange={(e) => setRegistrationForm({ ...registrationForm, notes: e.target.value })} className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white" placeholder="Tell the organizer your preferred setup, seed, or availability." />
+              </div>
+
+              <div className="rounded-2xl border border-cyan-500/15 bg-cyan-500/8 p-3 text-sm text-zinc-300">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Entry fee</span>
+                  <span className="font-semibold text-white">{activeTournament.entry_fee && activeTournament.entry_fee > 0 ? `$${activeTournament.entry_fee}` : 'Free'}</span>
+                </div>
+                <p className="mt-2 text-xs text-zinc-400">{activeTournament.entry_fee && activeTournament.entry_fee > 0 ? 'Submit your provider reference only after paying through the host-approved channel. The host must verify it before your slot is approved.' : 'Free sign-up is instant and your bracket spot is confirmed.'}</p>
+              </div>
+
+              {registrationMessage && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-200">{registrationMessage}</div>}
+
+              {pendingPaymentRegistrationId && (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <p className="mb-2 text-sm text-zinc-200">Submit your payment reference for host review.</p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input value={paymentReferenceInput} onChange={(e) => setPaymentReferenceInput(e.target.value)} placeholder="Payment reference" className="flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
+                    <button type="button" onClick={handleConfirmPayment} className="rounded-xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-black">Submit ref</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setShowRegistrationModal(false)} className="rounded-xl border border-white/10 px-3 py-2 text-sm text-zinc-300">Cancel</button>
+                <button type="submit" disabled={registering || activeIsFull} className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">{activeIsFull ? 'Tournament full' : registering ? 'Joining...' : activeTournament.entry_fee && activeTournament.entry_fee > 0 ? 'Join & pay' : 'Join for free'}</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -799,9 +1302,27 @@ export default function TournamentsView({
             <div className="space-y-4">
               <div className="text-xs space-y-1.5 text-gray-400">
                 <p>Status: <span className="text-white capitalize font-bold">{selectedMatch.status}</span></p>
+                {selectedMatch.scheduled_time && (
+                  <p>Scheduled: <span className="text-white font-semibold">{formatDateTime(selectedMatch.scheduled_time)}</span></p>
+                )}
                 {selectedMatch.winner_id && (
                   <p>Winner: <span className="text-cyan-400 font-extrabold">{profiles.find(p => p.id === selectedMatch.winner_id)?.username}</span></p>
                 )}
+                {(() => {
+                  const opponentId = currentUser.id === selectedMatch.player1_id ? selectedMatch.player2_id : selectedMatch.player1_id;
+                  const opponent = profiles.find(profile => profile.id === opponentId);
+                  return opponentId ? (
+                    <button
+                      onClick={() => {
+                        setSelectedMatch(null);
+                        openChatWithMember(opponentId);
+                      }}
+                      className="mt-2 inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-semibold text-cyan-300 transition-colors hover:bg-cyan-500/20"
+                    >
+                      DM {getProfileDisplayName(opponent)}
+                    </button>
+                  ) : null;
+                })()}
               </div>
 
               {/* ACTION FOR PLAYERS: SUBMIT RESULTS FORM */}
@@ -845,14 +1366,21 @@ export default function TournamentsView({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] text-gray-400 uppercase font-semibold">Proof Screenshot URL</label>
+                    <label className="text-[10px] text-gray-400 uppercase font-semibold">Proof Upload</label>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-white file:mr-3 file:rounded-full file:border-0 file:bg-cyan-500/15 file:px-3 file:py-1 file:text-[11px] file:font-semibold file:text-cyan-300"
+                    />
                     <input 
                       type="url" 
-                      placeholder="e.g. imgur.com/my-score-card.png"
+                      placeholder="Or paste a public proof URL"
                       value={proofUrlInput}
                       onChange={(e) => setProofUrlInput(e.target.value)}
                       className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-750"
                     />
+                    <p className="text-[10px] text-gray-500">Upload a screenshot or document directly to the tournament proof gallery.</p>
                   </div>
 
                   <button
@@ -866,7 +1394,7 @@ export default function TournamentsView({
               )}
 
               {/* ACTION FOR ORGANIZERS: FORCE VERIFY / DISPUTE RESOLUTION */}
-              {(currentUser.role === 'organizer' || currentUser.role === 'admin') && 
+              {canManageActiveTournament && 
                selectedMatch.status !== 'completed' && selectedMatch.player1_id && selectedMatch.player2_id && (
                 <div className="border-t border-white/5 pt-4 space-y-4">
                   <h4 className="text-xs font-extrabold uppercase tracking-widest text-cyan-400 flex items-center gap-1.5">

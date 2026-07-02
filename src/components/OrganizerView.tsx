@@ -74,6 +74,17 @@ export default function OrganizerView({
 
   const getPlayerName = (id: string) => profiles.find(p => p.id === id)?.username || 'Unknown';
 
+  const handleSendNotice = async (playerId: string, tournamentId: string) => {
+    const message = window.prompt('Send a direct update to this player:');
+    if (!message?.trim()) return;
+    try {
+      await db.sendTournamentNotice(tournamentId, playerId, 'Tournament update', message.trim());
+      alert('Notice sent to the player.');
+    } catch (err: any) {
+      alert(err.message || 'Could not send notice.');
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-6 animate-pulse text-left">
@@ -145,6 +156,12 @@ export default function OrganizerView({
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleSendNotice(reg.player_id, reg.tournament_id)}
+                        className="px-2.5 py-1 border border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10 rounded-lg text-[10px] transition-colors cursor-pointer"
+                      >
+                        Message
+                      </button>
                       <button
                         onClick={() => handleAction(reg.id, 'approved')}
                         className="px-2.5 py-1 bg-cyan-500 hover:bg-cyan-400 text-black font-semibold rounded-lg text-[10px] transition-colors cursor-pointer"
@@ -223,7 +240,7 @@ export default function OrganizerView({
                 { step: '4', title: 'Review & Crown Champions', desc: 'Verify score reports to advance the bracket.' }
               ].map(item => (
                 <div key={item.step} className="flex gap-3 items-start text-xs">
-                  <div className="h-5 w-5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">
+                  <div className="h-5 w-5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">
                     {item.step}
                   </div>
                   <div>

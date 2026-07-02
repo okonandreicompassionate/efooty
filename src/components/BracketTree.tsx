@@ -1,6 +1,12 @@
 import { Award, Clock, AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { Match, Profile } from '../types';
 
+const formatDateTime = (value?: string) => {
+  if (!value) return 'TBD';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'TBD' : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+};
+
 interface BracketTreeProps {
   matches: Match[];
   profiles: Profile[];
@@ -125,6 +131,13 @@ export default function BracketTree({ matches, profiles, currentUser, onMatchSel
             </span>
           </div>
         </div>
+
+        {match.scheduled_time && (
+          <div className="mt-2 text-[10px] text-zinc-500 flex items-center justify-between">
+            <span>{formatDateTime(match.scheduled_time)}</span>
+            <span className="text-zinc-600">Scheduled</span>
+          </div>
+        )}
 
         {/* Hover detail hint */}
         <div className="mt-2 text-[10px] text-zinc-500 text-right opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-0.5">

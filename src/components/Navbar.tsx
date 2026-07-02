@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Trophy, Bell, Shield, LogOut, Check, ChevronDown, Gamepad2 } from 'lucide-react';
+import { Trophy, Bell, Shield, LogOut, Check, ChevronDown, Menu, X, MessageSquare, Users } from 'lucide-react';
 import { Profile, Notification } from '../types';
 import { db } from '../services/db';
+import { supabase } from '../supabase';
 
 interface NavbarProps {
   currentUser: Profile;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   notifications: Notification[];
+  unreadDmCount: number;
   onRefreshNotifications: () => void;
 }
 
@@ -16,10 +18,12 @@ export default function Navbar({
   activeTab, 
   setActiveTab, 
   notifications,
+  unreadDmCount,
   onRefreshNotifications 
 }: NavbarProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
@@ -29,8 +33,8 @@ export default function Navbar({
   };
 
   return (
-    <nav className="sticky top-0 z-40 w-full border-b border-white/5 bg-black/40 backdrop-blur-md">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <nav className="sticky top-4 z-40 mx-4 rounded-[28px] border border-white/10 bg-zinc-950/70 px-2 shadow-[0_20px_70px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+      <div className="mx-auto max-w-7xl px-2 sm:px-4 lg:px-6">
         <div className="flex h-16 items-center justify-between">
           
           {/* Logo */}
@@ -48,6 +52,8 @@ export default function Navbar({
             {[
               { id: 'dashboard', name: 'Dashboard' },
               { id: 'tournaments', name: 'Tournaments' },
+              { id: 'messages', name: 'DMs' },
+              { id: 'friends', name: 'Friends' },
               { id: 'leaderboard', name: 'Leaderboard' },
               { id: 'achievements', name: 'Achievements' },
               { id: 'settings', name: 'Settings' }
@@ -56,13 +62,20 @@ export default function Navbar({
                 key={tab.id}
                 id={`nav-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2 text-sm font-medium transition-all duration-200 rounded-lg ${
+                className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-all duration-200 rounded-lg ${
                   activeTab === tab.id
                     ? 'text-cyan-400 bg-white/5 border border-white/10 shadow-sm'
                     : 'text-zinc-400 hover:text-white hover:bg-white/5'
                 }`}
               >
-                {tab.name}
+                {tab.id === 'messages' && <MessageSquare className="h-3.5 w-3.5" />}
+                {tab.id === 'friends' && <Users className="h-3.5 w-3.5" />}
+                <span>{tab.name}</span>
+                {tab.id === 'messages' && unreadDmCount > 0 && (
+                  <span className="ml-0.5 rounded-full bg-cyan-500 px-1.5 py-0.5 text-[10px] font-extrabold text-black">
+                    {unreadDmCount > 9 ? '9+' : unreadDmCount}
+                  </span>
+                )}
               </button>
             ))}
 
@@ -81,6 +94,16 @@ export default function Navbar({
                 Organizer Hub
               </button>
             )}
+          </div>
+
+          {/* Mobile menu button */}
+          <div className="flex items-center gap-2 md:hidden">
+            <button
+              onClick={() => setShowMobileMenu(!showMobileMenu)}
+              className="rounded-lg border border-white/10 bg-white/5 p-2 text-zinc-300"
+            >
+              {showMobileMenu ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
           </div>
 
           {/* Notifications & Profile Trays */}
@@ -193,9 +216,14 @@ export default function Navbar({
                     My Achievements
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setShowUserMenu(false);
-                      alert('To logout completely, please clear local credentials.');
+                      if (supabase) {
+                        await supabase.auth.signOut();
+                        window.location.reload();
+                      } else {
+                        alert('To logout completely, please clear local credentials.');
+                      }
                     }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 rounded-lg transition-colors text-left"
                   >
@@ -209,6 +237,35 @@ export default function Navbar({
           </div>
 
         </div>
+
+        {showMobileMenu && (
+          <div className="border-t border-white/5 bg-[#06070a] px-2 py-3 md:hidden">
+            <div className="flex flex-col gap-2">
+              {[{ id: 'dashboard', name: 'Dashboard' }, { id: 'tournaments', name: 'Tournaments' }, { id: 'messages', name: 'DMs' }, { id: 'friends', name: 'Friends' }, { id: 'leaderboard', name: 'Leaderboard' }, { id: 'achievements', name: 'Achievements' }, { id: 'settings', name: 'Settings' }].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => { setActiveTab(tab.id); setShowMobileMenu(false); }}
+                  className={`rounded-lg px-3 py-2 text-left text-sm font-medium ${activeTab === tab.id ? 'bg-cyan-500/10 text-cyan-400' : 'text-zinc-300 hover:bg-white/5'}`}
+                >
+                  <span>{tab.name}</span>
+                  {tab.id === 'messages' && unreadDmCount > 0 && (
+                    <span className="float-right rounded-full bg-cyan-500 px-1.5 py-0.5 text-[10px] font-extrabold text-black">
+                      {unreadDmCount > 9 ? '9+' : unreadDmCount}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {(currentUser.role === 'organizer' || currentUser.role === 'admin') && (
+                <button
+                  onClick={() => { setActiveTab('organizer'); setShowMobileMenu(false); }}
+                  className={`rounded-lg px-3 py-2 text-left text-sm font-semibold ${activeTab === 'organizer' ? 'bg-cyan-500 text-black' : 'text-cyan-400'}`}
+                >
+                  Organizer Hub
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </nav>
   );

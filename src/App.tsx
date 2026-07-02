@@ -6,22 +6,24 @@ import {
   Gamepad2, Info, CheckCircle2, ChevronRight 
 } from 'lucide-react';
 import { Profile, Tournament, Game, Notification } from './types';
-import { db, simulator } from './services/db';
+import { db, ensureDbSeeded } from './services/db';
 import { isSupabaseConfigured, getSupabaseConfig, supabase } from './supabase';
 import Navbar from './components/Navbar';
-import RoleSwitcher from './components/RoleSwitcher';
 import DashboardView from './components/DashboardView';
 import TournamentsView from './components/TournamentsView';
 import LeaderboardView from './components/LeaderboardView';
 import AchievementsView from './components/AchievementsView';
 import OrganizerView from './components/OrganizerView';
 import SettingsView from './components/SettingsView';
+import MessagesView from './components/MessagesView';
+import FriendsView from './components/FriendsView';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authUsername, setAuthUsername] = useState('');
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -31,27 +33,61 @@ export default function App() {
   const [games, setGames] = useState<Game[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadDmCount, setUnreadDmCount] = useState(0);
   const [selectedTournamentId, setSelectedTournamentId] = useState<string | null>(null);
+  const [appDataError, setAppDataError] = useState<string | null>(null);
 
   // Refresh helper
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Initial Auth Check
+  // Listen to Auth state changes
   useEffect(() => {
-    async function checkAuth() {
-      setIsAuthLoading(true);
+    if (!isSupabaseConfigured || !supabase) {
+      setIsAuthLoading(false);
+      return;
+    }
+
+    const initializeAuth = async () => {
       try {
-        const user = await db.getCurrentUser();
-        if (user) {
-          setCurrentUser(user);
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('[App] Failed to get current Supabase session:', sessionError);
+        }
+
+        if (session?.user) {
+          await ensureDbSeeded();
+          const profile = await db.getCurrentUser();
+          setCurrentUser(profile);
         }
       } catch (err) {
-        console.error('Error on auth check:', err);
+        console.error('[App] Error while initializing auth:', err);
       } finally {
         setIsAuthLoading(false);
       }
-    }
-    checkAuth();
+    };
+
+    initializeAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          try {
+            await ensureDbSeeded();
+            const profile = await db.getCurrentUser();
+            setCurrentUser(profile);
+          } catch (err) {
+            console.error('Failed to get profile:', err);
+          }
+        } else {
+          setCurrentUser(null);
+        }
+        setIsAuthLoading(false);
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Fetch application data
@@ -60,18 +96,49 @@ export default function App() {
 
     async function loadAppData() {
       try {
-        const [tournamentsData, gamesData, profilesData, notificationsData] = await Promise.all([
+        setAppDataError(null);
+        await ensureDbSeeded();
+        const results = await Promise.allSettled([
           db.getTournaments(),
           db.getGames(),
           db.getProfiles(),
-          db.getNotifications(currentUser.id)
+          db.getNotifications(currentUser.id),
+          db.getUnreadDmCount(currentUser.id)
         ]);
+
+        const [tournamentsResult, gamesResult, profilesResult, notificationsResult, unreadDmResult] = results;
+        const failedResults = results.filter(result => result.status === 'rejected') as PromiseRejectedResult[];
+
+        if (failedResults.length) {
+          console.error('Some app data failed to load:', failedResults.map(result => result.reason));
+          setAppDataError('Some live data could not be loaded. Check your Supabase schema and refresh.');
+        }
+
+        const tournamentsData = tournamentsResult.status === 'fulfilled' ? tournamentsResult.value : tournaments;
+        const gamesData = gamesResult.status === 'fulfilled' ? gamesResult.value : games;
+        const profilesData = profilesResult.status === 'fulfilled' ? profilesResult.value : profiles;
+        const notificationsData = notificationsResult.status === 'fulfilled' ? notificationsResult.value : notifications;
+        const unreadDmData = unreadDmResult.status === 'fulfilled' ? unreadDmResult.value : unreadDmCount;
+
+        console.info('[App] Loaded app data', {
+          tournaments: tournamentsData.length,
+          games: gamesData.length,
+          profiles: profilesData.length,
+          notifications: notificationsData.length
+        });
+
+        if (gamesData.length === 0) {
+          console.warn('[App] No games were returned from the database; the host form will use the fallback seeded options.');
+        }
+
         setTournaments(tournamentsData);
         setGames(gamesData);
         setProfiles(profilesData);
         setNotifications(notificationsData);
+        setUnreadDmCount(unreadDmData);
       } catch (err) {
         console.error('Error loading app data:', err);
+        setAppDataError('Live data failed to load. Check your Supabase connection and refresh.');
       }
     }
     loadAppData();
@@ -79,28 +146,6 @@ export default function App() {
 
   const handleRefreshData = () => {
     setRefreshTrigger(prev => prev + 1);
-  };
-
-  const handleRoleChange = async (role: any) => {
-    if (!currentUser) return;
-    const updated = await db.updateCurrentUserRole(role);
-    setCurrentUser(updated);
-    
-    // Switch active tab if switching away from Organizer hub
-    if (role === 'player' && activeTab === 'organizer') {
-      setActiveTab('dashboard');
-    }
-    handleRefreshData();
-  };
-
-  const handleSandboxLogin = (profileId: string) => {
-    const targetProfile = simulator.profiles.find(p => p.id === profileId);
-    if (targetProfile) {
-      simulator.currentUser = targetProfile;
-      setCurrentUser(targetProfile);
-      setAuthError(null);
-      simulator.addLog(targetProfile.id, 'AUTH_SIGNIN', `Signed in as pre-seeded ${targetProfile.role}`);
-    }
   };
 
   // Real Supabase Auth submission
@@ -113,8 +158,8 @@ export default function App() {
       return;
     }
 
-    if (!authEmail.trim() || !authPassword.trim()) {
-      setAuthError("Please fill in both email and password.");
+    if (!authEmail.trim() || !authPassword.trim() || (authMode === 'signup' && !authUsername.trim())) {
+      setAuthError("Please fill in all required fields.");
       return;
     }
 
@@ -132,18 +177,31 @@ export default function App() {
         }
         
         if (data.user) {
+          await ensureDbSeeded();
           const profile = await db.getCurrentUser();
           setCurrentUser(profile);
           handleRefreshData();
         }
       } else {
+        const username = authUsername.trim().replace(/\s+/g, '_').toLowerCase();
+        if (username.length < 3) {
+          setAuthError('Choose a username with at least 3 characters.');
+          return;
+        }
+
+        const isAvailable = await db.isUsernameAvailable(username);
+        if (!isAvailable) {
+          setAuthError('That username is already taken. Try another one.');
+          return;
+        }
+
         // Sign up
         const { data, error } = await supabase.auth.signUp({
           email: authEmail,
           password: authPassword,
           options: {
             data: {
-              username: authEmail.split('@')[0],
+              username,
               role: 'player'
             }
           }
@@ -163,11 +221,83 @@ export default function App() {
 
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-[#050505] text-zinc-100 flex flex-col items-center justify-center p-4">
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(129,140,248,0.16),transparent_34%),#05070b] text-zinc-100 flex flex-col items-center justify-center p-4">
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-black font-extrabold animate-bounce mb-4 shadow-[0_0_20px_rgba(6,182,212,0.4)]">
           <Trophy className="h-6 w-6" />
         </div>
         <p className="text-xs font-semibold uppercase tracking-widest text-cyan-400">Loading KickOff Arena...</p>
+      </div>
+    );
+  }
+
+  // FORCE SUPABASE CONFIGURATION IN LIVE MODE
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-zinc-100 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+        {/* Glow effect backdrops */}
+        <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-red-500/5 blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 h-96 w-96 rounded-full bg-amber-500/5 blur-3xl" />
+
+        <div className="w-full max-w-lg space-y-6 relative z-10">
+          <div className="text-center space-y-3">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-red-600 text-black font-black shadow-[0_0_30px_rgba(245,158,11,0.25)]">
+              <Info className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <h1 className="text-2xl font-black tracking-tight text-white uppercase">
+                Database Connection <span className="text-amber-400">Required</span>
+              </h1>
+              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-widest">KickOff Arena Live Mode</p>
+            </div>
+          </div>
+
+          <div className="rounded-[32px] border border-white/10 bg-zinc-950/60 p-6 sm:p-8 shadow-[0_30px_90px_rgba(0,0,0,0.35)] backdrop-blur-xl space-y-6 text-left">
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              This application has been set to <strong>Live Mode</strong> and requires a connected <strong>Supabase Database</strong>. Offline LocalStorage simulation is disabled.
+            </p>
+
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider border-b border-white/5 pb-2">Configuration Steps</h3>
+              
+              <div className="space-y-3 text-xs">
+                <div className="flex gap-3">
+                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-400 font-bold">1</div>
+                  <div className="text-zinc-400">
+                    <p className="font-semibold text-zinc-200">Create a Supabase Project</p>
+                    <p className="mt-0.5">Go to the <a href="https://database.new" target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">Supabase Dashboard</a> and start a new project.</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-400 font-bold">2</div>
+                  <div className="text-zinc-400">
+                    <p className="font-semibold text-zinc-200">Run the Database Schema</p>
+                    <p className="mt-0.5">Copy the entire query from <code className="text-zinc-200 bg-white/5 px-1 py-0.5 rounded">/supabase/schema.sql</code> and execute it in your Supabase SQL Editor.</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-400 font-bold">3</div>
+                  <div className="text-zinc-400">
+                    <p className="font-semibold text-zinc-200">Set Environment Variables</p>
+                    <p className="mt-0.5">Create a <code className="text-zinc-200 bg-white/5 px-1 py-0.5 rounded">.env</code> file in the project root and add your project variables:</p>
+                    <pre className="mt-2 p-3 bg-black/40 rounded-xl text-[10px] text-amber-300 font-mono border border-white/5 overflow-x-auto">
+{`VITE_SUPABASE_URL="https://your-project.supabase.co"
+VITE_SUPABASE_ANON_KEY="your-anon-key"`}
+                    </pre>
+                    <p className="text-[10px] text-zinc-400 mt-2">
+                      Use a <code className="text-zinc-200 bg-white/5 px-1 py-0.5 rounded">.env.local</code> file at the project root and restart the dev server.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-center pt-2">
+              <p className="text-[10px] text-zinc-500">Restart your development server after configuring the environment variables.</p>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -197,7 +327,7 @@ export default function App() {
           </div>
 
           {/* Login Credentials Box */}
-          <div className="rounded-3xl border border-white/5 bg-zinc-950/40 p-6 sm:p-8 shadow-2xl backdrop-blur-md space-y-6">
+          <div className="rounded-[32px] border border-white/10 bg-zinc-950/60 p-6 sm:p-8 shadow-[0_30px_90px_rgba(0,0,0,0.35)] backdrop-blur-xl space-y-6">
             
             {/* Mode Switcher */}
             <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-xl">
@@ -237,6 +367,22 @@ export default function App() {
                 </div>
               </div>
 
+              {authMode === 'signup' && (
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider">Username</label>
+                  <div className="relative">
+                    <Gamepad2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                    <input 
+                      type="text" 
+                      placeholder="e.g. clutch_king" 
+                      value={authUsername}
+                      onChange={(e) => setAuthUsername(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500/50"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider">Password</label>
                 <div className="relative">
@@ -259,60 +405,13 @@ export default function App() {
 
               <button 
                 type="submit"
-                className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-[0_4px_20px_rgba(6,182,212,0.15)]"
+                className="w-full py-2.5 bg-linear-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-[0_4px_20px_rgba(6,182,212,0.15)]"
               >
                 <LogIn className="h-4 w-4" />
                 {authMode === 'signin' ? 'Authenticate via Supabase' : 'Create Supabase Account'}
               </button>
             </form>
 
-            <div className="relative flex items-center justify-center py-1">
-              <div className="absolute left-0 right-0 border-t border-white/5" />
-              <span className="relative z-10 px-3 bg-zinc-950/80 text-[9px] font-bold text-zinc-500 uppercase tracking-widest">or Sandbox Entry</span>
-            </div>
-
-            {/* Sandbox Quick Bypass profiles */}
-            <div className="space-y-3.5">
-              <div className="text-center space-y-1">
-                <h4 className="text-xs font-extrabold text-white">Enter Live Sandbox Trial (Fast)</h4>
-                <p className="text-[10px] text-zinc-500">Pick any pre-seeded profile to play around with the platform right now.</p>
-              </div>
-
-              <div className="space-y-2">
-                {[
-                  { id: 'u-admin', name: 'Okon (Admin)', desc: 'Full authority, approve matches, generate brackets', avatar: 'okon' },
-                  { id: 'u-org1', name: 'Apex Host (Organizer)', desc: 'Host custom tournaments, approve player signups', avatar: 'apex' },
-                  { id: 'u-p1', name: 'Xenon (Player)', desc: 'Join arenas, submit verified match scores', avatar: 'xenon' }
-                ].map(prof => (
-                  <button
-                    key={prof.id}
-                    onClick={() => handleSandboxLogin(prof.id)}
-                    className="w-full flex items-center justify-between p-3 rounded-xl border border-white/5 bg-white/2 hover:bg-white/5 hover:border-cyan-500/30 text-left transition-all group cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2.5 max-w-[85%]">
-                      <img 
-                        src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${prof.avatar}`} 
-                        className="h-7 w-7 rounded bg-zinc-900 border border-white/5"
-                        alt=""
-                      />
-                      <div className="truncate">
-                        <p className="text-xs font-bold text-zinc-200 group-hover:text-cyan-400 transition-colors">{prof.name}</p>
-                        <p className="text-[10px] text-zinc-500 truncate mt-0.5">{prof.desc}</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-zinc-600 group-hover:text-cyan-400 transition-colors" />
-                  </button>
-                ))}
-              </div>
-            </div>
-
-          </div>
-
-          {/* Quick instructions indicator for Supabase Paste */}
-          <div className="text-center text-[10px] text-zinc-500 max-w-sm mx-auto space-y-2">
-            <p>
-              💡 This app uses a high-performance LocalStorage simulation fallback if Supabase keys are not set, meaning you can test it directly in the live iframe!
-            </p>
           </div>
 
         </div>
@@ -322,7 +421,7 @@ export default function App() {
 
   // RENDER AUTHENTICATED PLATFORM MAIN DASHBOARD
   return (
-    <div className="min-h-screen bg-[#050505] text-zinc-100 flex flex-col font-sans pb-28 relative overflow-hidden">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(129,140,248,0.16),transparent_34%),#05070b] text-zinc-100 flex flex-col font-sans pb-28 relative overflow-hidden">
       
       {/* Immersive background blurs */}
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-cyan-600/10 blur-[120px] -z-10 rounded-full" />
@@ -340,11 +439,18 @@ export default function App() {
           }
         }}
         notifications={notifications}
+        unreadDmCount={unreadDmCount}
         onRefreshNotifications={handleRefreshData}
       />
 
       {/* Main page stage */}
       <main className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 w-full relative z-10">
+        {appDataError && (
+          <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            {appDataError}
+          </div>
+        )}
+
         {activeTab === 'dashboard' && (
           <DashboardView 
             currentUser={currentUser} 
@@ -368,11 +474,19 @@ export default function App() {
         )}
 
         {activeTab === 'leaderboard' && (
-          <LeaderboardView games={games} />
+          <LeaderboardView games={games} tournaments={tournaments} />
         )}
 
         {activeTab === 'achievements' && (
           <AchievementsView currentUserId={currentUser.id} />
+        )}
+
+        {activeTab === 'messages' && (
+          <MessagesView currentUser={currentUser} profiles={profiles} />
+        )}
+
+        {activeTab === 'friends' && (
+          <FriendsView currentUser={currentUser} profiles={profiles} setActiveTab={setActiveTab} />
         )}
 
         {activeTab === 'organizer' && (
@@ -393,13 +507,6 @@ export default function App() {
           />
         )}
       </main>
-
-      {/* Role Switcher Hot-Swap Tool */}
-      <RoleSwitcher 
-        currentRole={currentUser.role} 
-        onRoleChange={handleRoleChange} 
-        isSupabaseConfigured={isSupabaseConfigured}
-      />
 
     </div>
   );

@@ -7,6 +7,9 @@ export interface Profile {
   avatar_url?: string;
   role: UserRole;
   bio?: string;
+  public_profile?: boolean;
+  show_email?: boolean;
+  allow_dms?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +40,11 @@ export interface Tournament {
   prize_pool: string;
   rules?: string;
   winner_id?: string;
+  entry_fee?: number;
+  payment_provider?: 'none' | 'paystack';
+  registration_note?: string;
+  auto_lock_registration?: boolean;
+  points_only?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -49,7 +57,33 @@ export interface TournamentPlayer {
   player_id: string;
   status: PlayerRegistrationStatus;
   seed_no?: number;
+  display_name?: string;
+  email?: string;
+  region?: string;
+  team_name?: string;
+  notes?: string;
+  paid?: boolean;
+  payment_status?: 'free' | 'pending' | 'paid';
+  payment_reference?: string;
   created_at: string;
+}
+
+export interface FriendChallenge {
+  id: string;
+  host_id: string;
+  opponent_id?: string;
+  opponent_name?: string;
+  game_id: string;
+  title: string;
+  status: 'pending' | 'accepted' | 'completed' | 'flagged';
+  host_score?: number;
+  opponent_score?: number;
+  proof_url?: string;
+  integrity_status?: 'pending' | 'verified' | 'flagged';
+  verified_by?: string;
+  points_awarded?: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Team {
@@ -155,6 +189,8 @@ export interface Settings {
   email_notifications: boolean;
   public_profile: boolean;
   dark_mode: boolean;
+  show_email?: boolean;
+  allow_dms?: boolean;
 }
 
 export interface ChatMessage {
@@ -165,5 +201,30 @@ export interface ChatMessage {
   avatar_url?: string;
   content: string;
   created_at: string;
+}
+
+export interface ChatRead {
+  id: string;
+  channel_id: string;
+  user_id: string;
+  last_read_at: string;
+}
+
+export type FriendshipStatus = 'pending' | 'accepted' | 'blocked';
+
+export interface Friendship {
+  id: string;
+  requester_id: string;
+  addressee_id: string;
+  status: FriendshipStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TournamentRosterCount {
+  tournament_id: string;
+  total: number;
+  approved: number;
+  pending: number;
 }
 

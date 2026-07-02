@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { 
   Trophy, User, Gamepad2, Calendar, TrendingUp, Sparkles, 
-  ArrowRight, Clock, ShieldCheck, Award, Zap, Activity, MessageSquare
+  ArrowRight, Clock, ShieldCheck, Award, Zap, Activity, MessageSquare, Swords
 } from 'lucide-react';
-import { Profile, Tournament, PlayerStatistics, ActivityLog, Game } from '../types';
+import { Profile, Tournament, PlayerStatistics, ActivityLog, Game, FriendChallenge, TournamentPlayer } from '../types';
 import { db } from '../services/db';
 import ChatBox from './ChatBox';
 
@@ -25,19 +25,35 @@ export default function DashboardView({
   const [stats, setStats] = useState<PlayerStatistics[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [userAchievements, setUserAchievements] = useState<string[]>([]);
+  const [friendChallenges, setFriendChallenges] = useState<FriendChallenge[]>([]);
+  const [myRegistrations, setMyRegistrations] = useState<TournamentPlayer[]>([]);
+  const [challengeOpponent, setChallengeOpponent] = useState('');
+  const [challengeTitle, setChallengeTitle] = useState('Friendly showdown');
+  const [challengeGame, setChallengeGame] = useState(games[0]?.id || '');
+  const [challengeMessage, setChallengeMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if ((!challengeGame || !games.some(game => game.id === challengeGame)) && games.length > 0) {
+      setChallengeGame(games[0].id);
+    }
+  }, [games, challengeGame]);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [statsData, logsData, achData] = await Promise.all([
+        const [statsData, logsData, achData, challengeData, myRegsData] = await Promise.all([
           db.getPlayerStats(currentUser.id),
           db.getActivityLogs(currentUser.id),
-          db.getUserAchievements(currentUser.id)
+          db.getUserAchievements(currentUser.id),
+          db.getFriendChallenges(),
+          db.getMyTournamentRegistrations(currentUser.id)
         ]);
         setStats(statsData);
         setLogs(logsData.slice(0, 5)); // show recent 5
         setUserAchievements(achData.map(a => a.achievement_id));
+        setFriendChallenges(challengeData.filter(ch => ch.host_id === currentUser.id || ch.opponent_id === currentUser.id));
+        setMyRegistrations(myRegsData);
       } catch (err) {
         console.error('Error loading dashboard data:', err);
       } finally {
@@ -47,10 +63,39 @@ export default function DashboardView({
     loadData();
   }, [currentUser.id]);
 
+  const handleCreateChallenge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!challengeOpponent.trim()) return;
+    try {
+      const created = await db.createFriendChallenge(currentUser.id, challengeOpponent.trim(), challengeGame, challengeTitle.trim() || 'Friendly showdown');
+      setFriendChallenges(prev => [created, ...prev]);
+      setChallengeMessage(`Challenge sent to ${challengeOpponent.trim()}.`);
+      setChallengeOpponent('');
+      setChallengeTitle('Friendly showdown');
+    } catch (err) {
+      console.error('Failed to create challenge', err);
+      setChallengeMessage('Unable to create the challenge right now.');
+    }
+  };
+
+  const handleAcceptChallenge = async (challengeId: string) => {
+    try {
+      const accepted = await db.acceptFriendChallenge(challengeId, currentUser.id);
+      setFriendChallenges(prev => prev.map(ch => ch.id === accepted.id ? accepted : ch));
+      setChallengeMessage('Challenge accepted. Your friendly match is now in progress.');
+    } catch (err) {
+      console.error('Failed to accept challenge', err);
+      setChallengeMessage('Unable to accept the challenge right now.');
+    }
+  };
+
   // Derive general platform info
   const activeTournaments = tournaments.filter(t => t.status === 'active');
   const registrationTournaments = tournaments.filter(t => t.status === 'registration');
   const completedTournaments = tournaments.filter(t => t.status === 'completed');
+  const hostedTournaments = tournaments.filter(t => t.organizer_id === currentUser.id);
+  const myTournamentIds = new Set(myRegistrations.map(reg => reg.tournament_id));
+  const myTournaments = tournaments.filter(t => myTournamentIds.has(t.id));
 
   // Calculate cumulative stats across games for current user
   const totalPlayed = stats.reduce((acc, s) => acc + s.matches_played, 0);
@@ -91,19 +136,30 @@ export default function DashboardView({
               Pre-Seeded Competitive Season Live
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-              Welcome back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-indigo-400">{currentUser.username}</span>!
+              Welcome back, <span className="text-transparent bg-clip-text bg-linear-to-r from-cyan-400 to-indigo-400">{currentUser.username}</span>!
             </h1>
             <p className="text-sm text-zinc-400 max-w-lg">
               Manage your esports tournaments, register for upcoming matchmaking brackets, submit verified scorecards, and dominate the charts.
             </p>
           </div>
-          <button 
-            onClick={() => setActiveTab('tournaments')}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-semibold shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all hover:scale-105 cursor-pointer"
-          >
-            Explore Tournaments
-            <ArrowRight className="h-4 w-4" />
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button 
+              onClick={() => {
+                setSelectedTournamentId('new');
+                setActiveTab('tournaments');
+              }}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 font-semibold transition-all hover:bg-cyan-500/20 cursor-pointer"
+            >
+              Host Tournament
+            </button>
+            <button 
+              onClick={() => setActiveTab('tournaments')}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-semibold shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all hover:scale-105 cursor-pointer"
+            >
+              Explore Tournaments
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -200,6 +256,101 @@ export default function DashboardView({
             </div>
           </div>
 
+          {/* Friendly Challenge Hub */}
+          <div className="rounded-2xl border border-white/5 bg-zinc-950/40 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-white">Friendly Challenge Hub</h2>
+                <p className="text-xs text-zinc-500">Create quick friend-play matches, track them, and build points without a full bracket.</p>
+              </div>
+              <div className="rounded-full bg-cyan-500/10 p-2 text-cyan-400">
+                <Swords className="h-4 w-4" />
+              </div>
+            </div>
+
+            <form onSubmit={handleCreateChallenge} className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_auto]">
+              <input
+                value={challengeOpponent}
+                onChange={(e) => setChallengeOpponent(e.target.value)}
+                placeholder="Opponent name"
+                className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-zinc-500"
+              />
+              <input
+                value={challengeTitle}
+                onChange={(e) => setChallengeTitle(e.target.value)}
+                placeholder="Friendly showdown"
+                className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-zinc-500"
+              />
+              <select value={challengeGame} onChange={(e) => setChallengeGame(e.target.value)} className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white">
+                {games.length === 0 ? (
+                  <option value="" disabled>Loading games...</option>
+                ) : (
+                  games.map(game => <option key={game.id} value={game.id}>{game.name}</option>)
+                )}
+              </select>
+              <div className="md:col-span-3 flex items-center justify-between gap-3">
+                <span className="text-[11px] text-zinc-500">Verified wins award rank points and show up in your challenge history.</span>
+                <button type="submit" className="rounded-xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-black">Create challenge</button>
+              </div>
+            </form>
+
+            {challengeMessage && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200">{challengeMessage}</div>}
+
+            <div className="space-y-2">
+              {friendChallenges.length === 0 ? (
+                <p className="text-xs text-zinc-500">No challenges yet. Start one and keep the friendly season moving.</p>
+              ) : (
+                friendChallenges.slice(0, 4).map(challenge => (
+                  <div key={challenge.id} className="flex items-center justify-between rounded-xl border border-white/5 bg-zinc-900/30 px-3 py-2">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{challenge.title}</p>
+                      <p className="text-[11px] text-zinc-500">{challenge.status} • {challenge.integrity_status || 'pending'}</p>
+                    </div>
+                    {challenge.status === 'pending' && challenge.host_id !== currentUser.id && (
+                      <button onClick={() => handleAcceptChallenge(challenge.id)} className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-300">Accept</button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-white">My Tournaments</h2>
+              <button onClick={() => setActiveTab('tournaments')} className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors font-semibold">Browse</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {myTournaments.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-white/10 p-5 text-xs text-zinc-500 md:col-span-2">
+                  Joined tournaments will appear here.
+                </div>
+              ) : (
+                myTournaments.slice(0, 4).map(t => {
+                  const reg = myRegistrations.find(item => item.tournament_id === t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        setSelectedTournamentId(t.id);
+                        setActiveTab('tournaments');
+                      }}
+                      className="rounded-xl border border-white/5 bg-zinc-950/40 p-4 text-left hover:border-cyan-500/20"
+                    >
+                      <span className="mb-2 inline-flex rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-cyan-300">
+                        {reg?.status || t.status}
+                      </span>
+                      <p className="truncate text-sm font-bold text-white">{t.title}</p>
+                      <p className="mt-1 text-[11px] text-zinc-500">
+                        {new Date(t.start_time).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
           {/* Featured Tournaments */}
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -263,6 +414,32 @@ export default function DashboardView({
 
         {/* Right column (1 col wide) - Recent activity logs, achievements */}
         <div className="space-y-6">
+          {hostedTournaments.length > 0 && (
+            <div className="rounded-2xl border border-cyan-500/15 bg-cyan-500/5 p-5">
+              <h2 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-cyan-400" />
+                Host Dashboard
+              </h2>
+              <div className="space-y-3">
+                {hostedTournaments.slice(0, 4).map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      setSelectedTournamentId(t.id);
+                      setActiveTab('tournaments');
+                    }}
+                    className="w-full rounded-xl border border-white/5 bg-zinc-950/40 px-3 py-3 text-left hover:border-cyan-500/25"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="truncate text-sm font-semibold text-white">{t.title}</p>
+                      <span className="rounded-full bg-black/30 px-2 py-0.5 text-[10px] uppercase text-cyan-300">{t.status}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-zinc-500">Capacity {t.max_players} players</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           
           {/* Achievements Summary */}
           <div className="rounded-2xl border border-white/5 bg-zinc-950/40 p-5">
@@ -315,7 +492,7 @@ export default function DashboardView({
               ) : (
                 logs.map((log) => (
                   <div key={log.id} className="flex gap-3 items-start text-xs border-b border-white/5 pb-3 last:border-0 last:pb-0">
-                    <div className="h-2 w-2 rounded-full bg-cyan-400 mt-1.5 flex-shrink-0 shadow-[0_0_6px_rgba(6,182,212,0.6)]" />
+                    <div className="h-2 w-2 rounded-full bg-cyan-400 mt-1.5 shrink-0 shadow-[0_0_6px_rgba(6,182,212,0.6)]" />
                     <div>
                       <p className="font-semibold text-zinc-200 leading-tight">{log.description}</p>
                       <div className="flex items-center gap-2 mt-1">

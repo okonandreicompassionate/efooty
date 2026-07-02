@@ -65,6 +65,11 @@ create table public.tournaments (
     prize_pool text,
     rules text,
     winner_id uuid references public.profiles(id) on delete set null,
+    entry_fee integer not null default 0,
+    payment_provider text not null default 'none' check (payment_provider in ('none', 'paystack')),
+    registration_note text,
+    auto_lock_registration boolean not null default true,
+    points_only boolean not null default false,
     created_at timestamp with time zone default timezone('utc'::text, now()) not null,
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -78,10 +83,48 @@ create table public.tournament_players (
     player_id uuid references public.profiles(id) on delete cascade not null,
     status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
     seed_no integer,
+    display_name text,
+    email text,
+    region text,
+    team_name text,
+    notes text,
+    paid boolean not null default false,
+    payment_status text not null default 'free' check (payment_status in ('free', 'pending', 'paid')),
+    payment_reference text,
     created_at timestamp with time zone default timezone('utc'::text, now()) not null,
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
     unique(tournament_id, player_id)
 );
+
+create or replace function public.enforce_tournament_capacity()
+returns trigger as $$
+declare
+    approved_count integer;
+    player_limit integer;
+begin
+    if new.status = 'approved' then
+        select max_players into player_limit
+        from public.tournaments
+        where id = new.tournament_id;
+
+        select count(*) into approved_count
+        from public.tournament_players
+        where tournament_id = new.tournament_id
+          and status = 'approved'
+          and id <> coalesce(new.id, '00000000-0000-0000-0000-000000000000'::uuid);
+
+        if approved_count >= player_limit then
+            raise exception 'Tournament is full';
+        end if;
+    end if;
+
+    return new;
+end;
+$$ language plpgsql;
+
+create trigger enforce_tournament_capacity_before_write
+    before insert or update on public.tournament_players
+    for each row execute procedure public.enforce_tournament_capacity();
 
 -- ==========================================
 -- 5. TEAMS (Optional for team tournaments)
@@ -166,6 +209,41 @@ create table public.user_achievements (
 );
 
 -- ==========================================
+-- FRIEND CHALLENGES TABLE
+-- ==========================================
+create table public.friend_challenges (
+    id uuid default gen_random_uuid() primary key,
+    host_id uuid references public.profiles(id) on delete cascade not null,
+    opponent_id uuid references public.profiles(id),
+    opponent_name text,
+    game_id uuid references public.games(id) on delete restrict not null,
+    title text not null,
+    status text not null default 'pending' check (status in ('pending', 'accepted', 'completed', 'flagged')),
+    host_score integer,
+    opponent_score integer,
+    proof_url text,
+    integrity_status text not null default 'pending' check (integrity_status in ('pending', 'verified', 'flagged')),
+    verified_by uuid references public.profiles(id),
+    points_awarded integer, 
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ==========================================
+-- FRIENDSHIPS TABLE
+-- ==========================================
+create table public.friendships (
+    id uuid default gen_random_uuid() primary key,
+    requester_id uuid references public.profiles(id) on delete cascade not null,
+    addressee_id uuid references public.profiles(id) on delete cascade not null,
+    status text not null default 'pending' check (status in ('pending', 'accepted', 'blocked')),
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    check (requester_id <> addressee_id),
+    unique(requester_id, addressee_id)
+);
+
+-- ==========================================
 -- 10. LEADERBOARDS TABLE
 -- ==========================================
 create table public.leaderboards (
@@ -217,9 +295,26 @@ create table public.settings (
     email_notifications boolean not null default true,
     public_profile boolean not null default true,
     dark_mode boolean not null default true,
+    show_email boolean not null default false,
+    allow_dms boolean not null default true,
+    anonymous_mode boolean not null default false,
     created_at timestamp with time zone default timezone('utc'::text, now()) not null,
     updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+create policy "Allow owners to insert their own settings" on public.settings
+    for insert with check (auth.uid()::uuid = user_id);
+
+create policy "Allow owners to select and update their own settings" on public.settings
+    for select, update using (auth.uid()::uuid = user_id);
+
+create policy "Allow admins to delete settings" on public.settings
+    for delete using (
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid()::uuid and role = 'admin'
+        )
+    );
 
 -- ==========================================
 -- AUTOMATIC PROFILE CREATION ON SIGNUP
@@ -282,6 +377,7 @@ alter table public.match_results enable row level security;
 alter table public.notifications enable row level security;
 alter table public.achievements enable row level security;
 alter table public.user_achievements enable row level security;
+alter table public.friendships enable row level security;
 alter table public.leaderboards enable row level security;
 alter table public.player_statistics enable row level security;
 alter table public.activity_logs enable row level security;
@@ -291,20 +387,26 @@ alter table public.settings enable row level security;
 create policy "Allow public read on profiles" on public.profiles
     for select using (true);
 
+create policy "Allow authenticated users to create their own profile" on public.profiles
+    for insert with check (auth.uid()::uuid = id);
+
 create policy "Allow owners to update their own profile" on public.profiles
-    for update using (auth.uid() = id);
+    for update using (auth.uid()::uuid = id);
 
 create policy "Allow admins to delete profiles" on public.profiles
     for delete using (
         exists (
             select 1 from public.profiles
-            where id = auth.uid() and role = 'admin'
+            where id = auth.uid()::uuid and role = 'admin'
         )
     );
 
 -- GAMES POLICIES
 create policy "Allow public read on games" on public.games
     for select using (true);
+
+create policy "Allow authenticated users to seed games" on public.games
+    for insert with check (true);
 
 create policy "Allow admins and organizers to manage games" on public.games
     for all using (
@@ -315,14 +417,35 @@ create policy "Allow admins and organizers to manage games" on public.games
     );
 
 -- TOURNAMENTS POLICIES
+-- Drop existing tournament policies before creating fresh authoritative rules.
+drop policy if exists "Allow public read on tournaments" on public.tournaments;
+drop policy if exists "Allow authenticated users to create their own tournaments" on public.tournaments;
+drop policy if exists "Allow tournament owners and admins to update tournaments" on public.tournaments;
+drop policy if exists "Allow tournament owners and admins to delete tournaments" on public.tournaments;
+
 create policy "Allow public read on tournaments" on public.tournaments
     for select using (true);
 
-create policy "Allow organizers and admins to manage tournaments" on public.tournaments
-    for all using (
+create policy "Allow authenticated users to create their own tournaments" on public.tournaments
+    for insert with check (
+        auth.uid()::uuid = organizer_id
+    );
+
+create policy "Allow tournament owners and admins to update tournaments" on public.tournaments
+    for update using (
+        auth.uid()::uuid = organizer_id or
         exists (
             select 1 from public.profiles
-            where id = auth.uid() and role in ('admin', 'organizer')
+            where id = auth.uid()::uuid and role in ('admin', 'organizer')
+        )
+    );
+
+create policy "Allow tournament owners and admins to delete tournaments" on public.tournaments
+    for delete using (
+        auth.uid()::uuid = organizer_id or
+        exists (
+            select 1 from public.profiles
+            where id = auth.uid()::uuid and role in ('admin', 'organizer')
         )
     );
 
@@ -336,11 +459,25 @@ create policy "Allow players to register themselves" on public.tournament_player
 create policy "Allow players to cancel registration" on public.tournament_players
     for delete using (auth.uid() = player_id);
 
+create policy "Allow organizers/admins to remove registrations" on public.tournament_players
+    for delete using (
+        exists (
+            select 1 from public.tournaments t
+            where t.id = tournament_id and t.organizer_id = auth.uid()::uuid
+        ) or exists (
+            select 1 from public.profiles
+            where id = auth.uid() and role = 'admin'
+        )
+    );
+
 create policy "Allow organizers/admins to manage registrations" on public.tournament_players
     for update using (
         exists (
+            select 1 from public.tournaments t
+            where t.id = tournament_id and t.organizer_id = auth.uid()::uuid
+        ) or exists (
             select 1 from public.profiles
-            where id = auth.uid() and role in ('admin', 'organizer')
+            where id = auth.uid() and role = 'admin'
         )
     );
 
@@ -358,14 +495,57 @@ create policy "Allow captains/organizers to manage teams" on public.teams
     );
 
 -- MATCHES POLICIES
+drop policy if exists "Allow public read on matches" on public.matches;
+drop policy if exists "Allow organizers/admins or tournament owners to manage matches" on public.matches;
+drop policy if exists "Allow tournament hosts and admins to insert matches" on public.matches;
+drop policy if exists "Allow tournament hosts and admins to update matches" on public.matches;
+drop policy if exists "Allow tournament hosts and admins to delete matches" on public.matches;
+
 create policy "Allow public read on matches" on public.matches
     for select using (true);
 
-create policy "Allow organizers/admins to manage matches" on public.matches
-    for all using (
+create policy "Allow tournament hosts and admins to insert matches" on public.matches
+    for insert with check (
         exists (
+            select 1 from public.tournaments t
+            where t.id = public.matches.tournament_id
+              and t.organizer_id = auth.uid()::uuid
+        ) or exists (
             select 1 from public.profiles
-            where id = auth.uid() and role in ('admin', 'organizer')
+            where id = auth.uid()::uuid and role = 'admin'
+        )
+    );
+
+create policy "Allow tournament hosts and admins to update matches" on public.matches
+    for update using (
+        exists (
+            select 1 from public.tournaments t
+            where t.id = public.matches.tournament_id
+              and t.organizer_id = auth.uid()::uuid
+        ) or exists (
+            select 1 from public.profiles
+            where id = auth.uid()::uuid and role = 'admin'
+        )
+    ) with check (
+        exists (
+            select 1 from public.tournaments t
+            where t.id = public.matches.tournament_id
+              and t.organizer_id = auth.uid()::uuid
+        ) or exists (
+            select 1 from public.profiles
+            where id = auth.uid()::uuid and role = 'admin'
+        )
+    );
+
+create policy "Allow tournament hosts and admins to delete matches" on public.matches
+    for delete using (
+        exists (
+            select 1 from public.tournaments t
+            where t.id = public.matches.tournament_id
+              and t.organizer_id = auth.uid()::uuid
+        ) or exists (
+            select 1 from public.profiles
+            where id = auth.uid()::uuid and role = 'admin'
         )
     );
 
@@ -401,8 +581,48 @@ create policy "Allow users to update their own notifications" on public.notifica
 create policy "Allow public read on achievements" on public.achievements
     for select using (true);
 
+create policy "Allow authenticated users to insert achievements" on public.achievements
+    for insert with check (
+        auth.uid() is not null
+    );
+
 create policy "Allow public read on user achievements" on public.user_achievements
     for select using (true);
+
+create policy "Allow authenticated users to insert user achievements" on public.user_achievements
+    for insert with check (
+        auth.uid()::uuid = user_id
+    );
+
+-- FRIEND CHALLENGES POLICIES
+create policy "Allow public read on friend challenges" on public.friend_challenges
+    for select using (true);
+
+create policy "Allow authenticated users to create friend challenges" on public.friend_challenges
+    for insert with check (
+        auth.uid()::uuid = host_id
+    );
+
+-- FRIENDSHIPS POLICIES
+create policy "Allow friendship participants to read" on public.friendships
+    for select using (
+        auth.uid()::uuid = requester_id or auth.uid()::uuid = addressee_id
+    );
+
+create policy "Allow users to create friendship requests" on public.friendships
+    for insert with check (
+        auth.uid()::uuid = requester_id or auth.uid()::uuid = addressee_id
+    );
+
+create policy "Allow friendship participants to update" on public.friendships
+    for update using (
+        auth.uid()::uuid = requester_id or auth.uid()::uuid = addressee_id
+    );
+
+create policy "Allow friendship participants to delete" on public.friendships
+    for delete using (
+        auth.uid()::uuid = requester_id or auth.uid()::uuid = addressee_id
+    );
 
 -- LEADERBOARDS POLICIES
 create policy "Allow public read on leaderboards" on public.leaderboards
@@ -486,7 +706,16 @@ create table public.chats (
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+create table public.chat_reads (
+    id uuid default gen_random_uuid() primary key,
+    channel_id text not null,
+    user_id uuid references public.profiles(id) on delete cascade not null,
+    last_read_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    unique(channel_id, user_id)
+);
+
 alter table public.chats enable row level security;
+alter table public.chat_reads enable row level security;
 
 create policy "Allow public read on chats" on public.chats
     for select using (true);
@@ -494,3 +723,11 @@ create policy "Allow public read on chats" on public.chats
 create policy "Allow authenticated users to send chat messages" on public.chats
     for insert with check (auth.role() = 'authenticated' and auth.uid() = user_id);
 
+create policy "Allow users to read their own chat receipts" on public.chat_reads
+    for select using (auth.uid()::uuid = user_id);
+
+create policy "Allow users to update their own chat receipts" on public.chat_reads
+    for insert with check (auth.uid()::uuid = user_id);
+
+create policy "Allow users to edit their own chat receipts" on public.chat_reads
+    for update using (auth.uid()::uuid = user_id);

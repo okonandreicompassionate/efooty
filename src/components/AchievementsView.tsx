@@ -96,7 +96,7 @@ export default function AchievementsView({ currentUserId }: AchievementsViewProp
               }`}
             >
               {/* Badge Emblem */}
-              <div className={`h-12 w-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+              <div className={`h-12 w-12 rounded-xl flex items-center justify-center shrink-0 ${
                 isEarned 
                   ? 'bg-cyan-500/10 text-cyan-400 ring-2 ring-cyan-500/20' 
                   : 'bg-zinc-900 text-zinc-650 ring-1 ring-white/5'
