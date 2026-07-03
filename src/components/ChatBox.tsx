@@ -14,9 +14,10 @@ interface ChatBoxProps {
   profiles?: Profile[];
   defaultRecipientId?: string;
   hostId?: string;
+  allowedRecipientIds?: string[];
 }
 
-export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat", profiles = [], defaultRecipientId, hostId }: ChatBoxProps) {
+export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat", profiles = [], defaultRecipientId, hostId, allowedRecipientIds }: ChatBoxProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -29,13 +30,20 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
   const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [viewOnce, setViewOnce] = useState(false);
+  const [openedEphemeralMessages, setOpenedEphemeralMessages] = useState<Record<string, string>>({});
   const [reactionsMap, setReactionsMap] = useState<Record<string, Record<string, { count: number; byUser: string[] }>>>({});
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   const availableRecipients = profiles
     .filter(profile => profile.id !== currentUser.id)
+    .filter(profile => !allowedRecipientIds || allowedRecipientIds.includes(profile.id))
     .filter(profile => profile.username.toLowerCase().includes(recipientSearch.toLowerCase()));
   const channelRecipients = tournamentId === 'global'
     ? [{ id: 'global', username: 'Global Chat Lobby' }, ...availableRecipients]
@@ -92,20 +100,8 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
         console.warn('Failed to load reactions:', e);
       }
 
-      // Auto-delete ephemeral (view-once) messages for DM recipients after loading.
       if (activeChannelId.startsWith('dm:')) {
         await db.markChatRead(activeChannelId, currentUser.id);
-        for (const msg of data || []) {
-          try {
-            const payload = JSON.parse(msg.content || '{}');
-            if (payload?.ephemeral && msg.user_id !== currentUser.id) {
-              // Delete on server so it can't be viewed again.
-              db.deleteChatMessage(msg.id).catch((e) => console.warn('Failed to delete ephemeral message:', e));
-            }
-          } catch (e) {
-            // ignore parse errors
-          }
-        }
       }
       // load typing users
       try {
@@ -120,6 +116,39 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
       setLoading(false);
     }
   };
+
+  const handleOpenEphemeralMessage = async (msg: ChatMessage) => {
+    try {
+      setOpenedEphemeralMessages((prev) => ({ ...prev, [msg.id]: msg.content }));
+      setMessages((prev) => prev.filter((existing) => existing.id !== msg.id));
+      await db.deleteChatMessage(msg.id);
+    } catch (err) {
+      console.warn('Failed to delete opened ephemeral message:', err);
+    }
+  };
+
+  useEffect(() => {
+    setOpenedEphemeralMessages({});
+  }, [activeChannelId]);
+
+  useEffect(() => {
+    if (!activeChannelId.startsWith('dm:')) return;
+
+    return () => {
+      const hiddenEphemeralMessages = messagesRef.current.filter((msg) => {
+        if (msg.user_id === currentUser.id) return false;
+        try {
+          const payload = JSON.parse(msg.content || '{}');
+          return payload?.ephemeral;
+        } catch {
+          return false;
+        }
+      });
+      hiddenEphemeralMessages.forEach((msg) => {
+        db.deleteChatMessage(msg.id).catch(() => {});
+      });
+    };
+  }, [activeChannelId, currentUser.id]);
 
   useEffect(() => {
     if (tournamentId === 'global' && !activeChannelId) return;
@@ -234,7 +263,7 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
     }
   };
 
-  const renderMessageContent = (content: string) => {
+  const renderMessageContent = (content: string, isEphemeralOpen = false) => {
     try {
       const payload = JSON.parse(content);
       const replyPreview = payload?.reply_to ? messages.find(m => m.id === payload.reply_to) : null;
@@ -264,7 +293,7 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
       }
       if (payload?.type === 'text' && typeof payload.text === 'string') {
         return (
-          <div>
+          <div className={isEphemeralOpen ? 'select-none' : undefined} style={isEphemeralOpen ? { WebkitUserSelect: 'none' as const, userSelect: 'none' as const } : undefined}>
             {replyPreview ? (
               <div className="mb-2 rounded-lg border border-white/5 bg-black/20 p-2 text-[11px] text-zinc-300">
                 <strong className="text-[10px] text-zinc-200">Reply to {replyPreview.username}:</strong>
@@ -279,7 +308,17 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
       // Fall back to plain text.
     }
 
-    return <span className="whitespace-pre-wrap">{content}</span>;
+    return (
+      <span
+        className={isEphemeralOpen ? 'select-none whitespace-pre-wrap' : 'whitespace-pre-wrap'}
+        style={isEphemeralOpen ? { WebkitUserSelect: 'none' as const, userSelect: 'none' as const } : undefined}
+        onCopy={(e) => {
+          if (isEphemeralOpen) e.preventDefault();
+        }}
+      >
+        {content}
+      </span>
+    );
   };
 
   const getRoleBadge = (userId: string) => {
@@ -358,7 +397,7 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
           <input
             value={recipientSearch}
             onChange={(e) => setRecipientSearch(e.target.value)}
-            placeholder="Search users"
+            placeholder={allowedRecipientIds ? 'Search friends' : 'Search users'}
             className="w-full rounded-xl border border-white/10 bg-black/30 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder-zinc-500"
           />
         </div>
@@ -399,13 +438,43 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
                     </span>
                   </div>
 
-                  <div className={`rounded-2xl p-3 text-xs leading-relaxed shadow-lg ${
-                    isMe
-                      ? 'border border-cyan-500/20 bg-linear-to-br from-cyan-600/20 to-indigo-600/20 text-zinc-100 rounded-tr-none'
-                      : 'border border-white/10 bg-[#161a22]/90 text-zinc-300 rounded-tl-none'
-                  }`}>
-                    {renderMessageContent(msg.content)}
-                  </div>
+                  {(() => {
+                    const isHiddenEphemeral = (() => {
+                      if (!activeChannelId.startsWith('dm:')) return false;
+                      try {
+                        const payload = JSON.parse(msg.content || '{}');
+                        return payload?.ephemeral && msg.user_id !== currentUser.id && !openedEphemeralMessages[msg.id];
+                      } catch {
+                        return false;
+                      }
+                    })();
+
+                    if (isHiddenEphemeral) {
+                      return (
+                        <div className="rounded-2xl border border-dashed border-amber-500/30 bg-[#0f1117]/90 p-4 text-sm text-zinc-300">
+                          <p className="font-semibold text-white">View once message</p>
+                          <p className="mt-2 text-[11px] text-zinc-500">This message is hidden until you open it. It will disappear once you leave this chat.</p>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEphemeralMessage(msg)}
+                            className="mt-3 inline-flex rounded-full bg-amber-500 px-3 py-2 text-xs font-semibold text-black"
+                          >
+                            Open once
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className={`rounded-2xl p-3 text-xs leading-relaxed shadow-lg ${
+                        isMe
+                          ? 'border border-cyan-500/20 bg-linear-to-br from-cyan-600/20 to-indigo-600/20 text-zinc-100 rounded-tr-none'
+                          : 'border border-white/10 bg-[#161a22]/90 text-zinc-300 rounded-tl-none'
+                      }`}>
+                        {renderMessageContent(msg.content, Boolean(openedEphemeralMessages[msg.id]))}
+                      </div>
+                    );
+                  })()}
                   <div className="flex items-center gap-2 mt-1">
                     <button type="button" onClick={() => setReplyTo(msg)} className="text-[10px] text-zinc-400 hover:text-cyan-300">Reply</button>
                     {!isMe ? (

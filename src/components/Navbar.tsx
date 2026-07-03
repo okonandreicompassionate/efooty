@@ -10,6 +10,7 @@ interface NavbarProps {
   setActiveTab: (tab: string) => void;
   notifications: Notification[];
   unreadDmCount: number;
+  pendingFriendChallengesCount: number;
   onRefreshNotifications: () => void;
 }
 
@@ -19,6 +20,7 @@ export default function Navbar({
   setActiveTab, 
   notifications,
   unreadDmCount,
+  pendingFriendChallengesCount,
   onRefreshNotifications 
 }: NavbarProps) {
   const [showNotifications, setShowNotifications] = useState(false);
@@ -26,6 +28,7 @@ export default function Navbar({
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
+  const attentionCount = unreadCount + unreadDmCount + pendingFriendChallengesCount;
 
   const handleMarkRead = async (id: string) => {
     await db.markNotificationAsRead(id);
@@ -73,6 +76,9 @@ export default function Navbar({
                 {tab.id === 'friends' && <Users className="h-3.5 w-3.5" />}
                 {tab.id === 'friendly' && <Swords className="h-3.5 w-3.5" />}
                 <span>{tab.name}</span>
+                {tab.id === 'friendly' && pendingFriendChallengesCount > 0 && (
+                  <span className="ml-1 inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
+                )}
                 {tab.id === 'messages' && unreadDmCount > 0 && (
                   <span className="ml-0.5 rounded-full bg-cyan-500 px-1.5 py-0.5 text-[10px] font-extrabold text-black">
                     {unreadDmCount > 9 ? '9+' : unreadDmCount}
@@ -102,9 +108,12 @@ export default function Navbar({
           <div className="flex items-center gap-2 md:hidden">
             <button
               onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className="rounded-lg border border-white/10 bg-white/5 p-2 text-zinc-300"
+              className="relative rounded-lg border border-white/10 bg-white/5 p-2 text-zinc-300"
             >
               {showMobileMenu ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              {attentionCount > 0 && (
+                <span className="absolute -top-1 -right-1 inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-black" />
+              )}
             </button>
           </div>
 

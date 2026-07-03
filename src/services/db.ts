@@ -1377,13 +1377,22 @@ export const db = {
 
     if (error || !data) throw error || new Error('Failed to create friend challenge.');
 
-    await supabase.from('notifications').insert({
-      user_id: hostId,
-      title: 'Friend challenge created',
-      content: `You invited ${opponentName || 'a friend'} to a friendly match.`,
-      link: '/friends',
-      is_read: false
-    });
+    await supabase.from('notifications').insert([
+      {
+        user_id: hostId,
+        title: 'Friend challenge created',
+        content: `You invited ${opponentName || 'a friend'} to a friendly match.`,
+        link: '/friendly',
+        is_read: false
+      },
+      {
+        user_id: opponentId,
+        title: 'New friendly challenge',
+        content: `${opponentName || 'A friend'} has invited you to a friendly match.`,
+        link: '/friendly',
+        is_read: false
+      }
+    ]);
 
     return data as FriendChallenge;
   },
@@ -1398,6 +1407,15 @@ export const db = {
       .single();
 
     if (error || !data) throw error || new Error('Failed to accept friend challenge');
+
+    await supabase.from('notifications').insert({
+      user_id: data.host_id,
+      title: 'Friendly challenge accepted',
+      content: `${data.opponent_name || 'Your opponent'} accepted your friendly match request.`,
+      link: '/friendly',
+      is_read: false
+    });
+
     return data as FriendChallenge;
   },
 
@@ -1449,6 +1467,19 @@ export const db = {
     const { data, error } = await supabase.from('friend_challenges').select('*').order('created_at', { ascending: false });
     if (error) throw error;
     return data as FriendChallenge[];
+  },
+
+  getAcceptedFriendIds: async (userId: string): Promise<string[]> => {
+    assertSupabase();
+    const { data, error } = await supabase
+      .from('friendships')
+      .select('requester_id,addressee_id')
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+      .eq('status', 'accepted');
+    if (error) throw error;
+    return (data || [])
+      .map((row: any) => (row.requester_id === userId ? row.addressee_id : row.requester_id))
+      .filter(isUuid);
   },
 
   getFriendships: async (userId: string): Promise<Friendship[]> => {

@@ -8,6 +8,7 @@ interface FriendlyMatchesViewProps {
   profiles: Profile[];
   games: Game[];
   setActiveTab: (tab: string) => void;
+  onRefreshApp: () => void;
 }
 
 const MIN_SEARCH_LENGTH = 2;
@@ -120,6 +121,7 @@ export default function FriendlyMatchesView({ currentUser, profiles, games, setA
       setSelectedOpponent(null);
       setChallengeTitle('Friendly showdown');
       await loadChallenges();
+      onRefreshApp();
     } catch (err) {
       console.error('Failed to create friendly challenge:', err);
       setChallengeMessage('Unable to send the friendly challenge. Please try again.');
@@ -133,6 +135,7 @@ export default function FriendlyMatchesView({ currentUser, profiles, games, setA
       await db.acceptFriendChallenge(challengeId, currentUser.id);
       setChallengeMessage('Challenge accepted. Good luck!');
       await loadChallenges();
+      onRefreshApp();
     } catch (err) {
       console.error('Failed to accept friendly challenge:', err);
       setChallengeMessage('Could not accept the challenge at this time.');

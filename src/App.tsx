@@ -35,6 +35,7 @@ export default function App() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadDmCount, setUnreadDmCount] = useState(0);
+  const [pendingFriendChallengesCount, setPendingFriendChallengesCount] = useState(0);
   const [selectedTournamentId, setSelectedTournamentId] = useState<string | null>(null);
   const [appDataError, setAppDataError] = useState<string | null>(null);
 
@@ -104,10 +105,11 @@ export default function App() {
           db.getGames(),
           db.getProfiles(),
           db.getNotifications(currentUser.id),
-          db.getUnreadDmCount(currentUser.id)
+          db.getUnreadDmCount(currentUser.id),
+          db.getFriendChallenges()
         ]);
 
-        const [tournamentsResult, gamesResult, profilesResult, notificationsResult, unreadDmResult] = results;
+        const [tournamentsResult, gamesResult, profilesResult, notificationsResult, unreadDmResult, friendChallengesResult] = results;
         const failedResults = results.filter(result => result.status === 'rejected') as PromiseRejectedResult[];
 
         if (failedResults.length) {
@@ -120,12 +122,15 @@ export default function App() {
         const profilesData = profilesResult.status === 'fulfilled' ? profilesResult.value : profiles;
         const notificationsData = notificationsResult.status === 'fulfilled' ? notificationsResult.value : notifications;
         const unreadDmData = unreadDmResult.status === 'fulfilled' ? unreadDmResult.value : unreadDmCount;
+        const friendChallengesData = friendChallengesResult.status === 'fulfilled' ? friendChallengesResult.value : [];
+        const pendingFriendCount = friendChallengesData.filter((challenge) => challenge.status === 'pending' && challenge.opponent_id === currentUser.id).length;
 
         console.info('[App] Loaded app data', {
           tournaments: tournamentsData.length,
           games: gamesData.length,
           profiles: profilesData.length,
-          notifications: notificationsData.length
+          notifications: notificationsData.length,
+          pendingFriendChallenges: pendingFriendCount
         });
 
         if (gamesData.length === 0) {
@@ -137,6 +142,7 @@ export default function App() {
         setProfiles(profilesData);
         setNotifications(notificationsData);
         setUnreadDmCount(unreadDmData);
+        setPendingFriendChallengesCount(pendingFriendCount);
       } catch (err) {
         console.error('Error loading app data:', err);
         setAppDataError('Live data failed to load. Check your Supabase connection and refresh.');
@@ -441,6 +447,7 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"`}
         }}
         notifications={notifications}
         unreadDmCount={unreadDmCount}
+        pendingFriendChallengesCount={pendingFriendChallengesCount}
         onRefreshNotifications={handleRefreshData}
       />
 
@@ -491,7 +498,7 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"`}
         )}
 
         {activeTab === 'friendly' && (
-          <FriendlyMatchesView currentUser={currentUser} profiles={profiles} games={games} setActiveTab={setActiveTab} />
+          <FriendlyMatchesView currentUser={currentUser} profiles={profiles} games={games} setActiveTab={setActiveTab} onRefreshApp={handleRefreshData} />
         )}
 
         {activeTab === 'organizer' && (

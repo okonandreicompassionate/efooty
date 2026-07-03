@@ -13,6 +13,7 @@ interface DashboardViewProps {
   games: Game[];
   setActiveTab: (tab: string) => void;
   setSelectedTournamentId: (id: string) => void;
+  onRefreshApp?: () => void;
 }
 
 export default function DashboardView({ 
@@ -59,6 +60,7 @@ export default function DashboardView({
       const accepted = await db.acceptFriendChallenge(challengeId, currentUser.id);
       setFriendChallenges(prev => prev.map(ch => ch.id === accepted.id ? accepted : ch));
       setChallengeMessage('Challenge accepted. Your friendly match is now in progress.');
+      onRefreshApp?.();
     } catch (err) {
       console.error('Failed to accept challenge', err);
       setChallengeMessage('Unable to accept the challenge right now.');

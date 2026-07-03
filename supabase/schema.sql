@@ -603,6 +603,11 @@ create policy "Allow authenticated users to create friend challenges" on public.
         auth.uid()::uuid = host_id
     );
 
+create policy "Allow challenge participants to update friend challenges" on public.friend_challenges
+    for update using (
+        auth.uid()::uuid = host_id or auth.uid()::uuid = opponent_id
+    );
+
 -- FRIENDSHIPS POLICIES
 create policy "Allow friendship participants to read" on public.friendships
     for select using (
@@ -611,7 +616,8 @@ create policy "Allow friendship participants to read" on public.friendships
 
 create policy "Allow users to create friendship requests" on public.friendships
     for insert with check (
-        auth.uid()::uuid = requester_id or auth.uid()::uuid = addressee_id
+        auth.uid()::uuid IS NOT NULL and
+        (auth.uid()::uuid = requester_id or auth.uid()::uuid = addressee_id)
     );
 
 create policy "Allow friendship participants to update" on public.friendships
@@ -722,6 +728,21 @@ create policy "Allow public read on chats" on public.chats
 
 create policy "Allow authenticated users to send chat messages" on public.chats
     for insert with check (auth.role() = 'authenticated' and auth.uid() = user_id);
+
+create policy "Allow users to delete chat messages in their DMs or own messages" on public.chats
+    for delete using (
+        auth.role() = 'authenticated'
+        and (
+            user_id = auth.uid()::uuid
+            or (
+                tournament_id like 'dm:%'
+                and auth.uid()::text in (
+                    split_part(tournament_id, ':', 2),
+                    split_part(tournament_id, ':', 3)
+                )
+            )
+        )
+    );
 
 create policy "Allow users to read their own chat receipts" on public.chat_reads
     for select using (auth.uid()::uuid = user_id);

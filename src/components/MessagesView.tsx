@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { MessageSquare, Search } from 'lucide-react';
 import { Profile } from '../types';
+import { db } from '../services/db';
 import ChatBox from './ChatBox';
 
 interface MessagesViewProps {
@@ -12,16 +13,31 @@ interface MessagesViewProps {
 export default function MessagesView({ currentUser, profiles, defaultRecipientId }: MessagesViewProps) {
   const [selectedRecipientId, setSelectedRecipientId] = useState(defaultRecipientId || '');
   const [search, setSearch] = useState('');
+  const [friendIds, setFriendIds] = useState<string[]>([]);
 
   const normalizedSearch = search.trim().toLowerCase();
+
+  useEffect(() => {
+    const loadFriendIds = async () => {
+      try {
+        const friendIds = await db.getAcceptedFriendIds(currentUser.id);
+        setFriendIds(friendIds);
+      } catch (err) {
+        console.error('Failed to load friend IDs for DM search:', err);
+      }
+    };
+    loadFriendIds();
+  }, [currentUser.id]);
+
   const results = useMemo(() => profiles
     .filter(profile => profile.id !== currentUser.id)
+    .filter(profile => friendIds.includes(profile.id))
     .filter(profile => {
       if (!normalizedSearch) return true;
       const searchableText = `${profile.username ?? ''} ${profile.email ?? ''} ${profile.role ?? ''}`.toLowerCase();
       return searchableText.includes(normalizedSearch);
     })
-    .slice(0, 10), [profiles, currentUser.id, normalizedSearch]);
+    .slice(0, 10), [profiles, currentUser.id, normalizedSearch, friendIds]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300 text-left">
@@ -43,6 +59,7 @@ export default function MessagesView({ currentUser, profiles, defaultRecipientId
             profiles={profiles}
             title="Direct Messages"
             defaultRecipientId={selectedRecipientId || defaultRecipientId}
+            allowedRecipientIds={friendIds}
           />
         </div>
 
@@ -62,6 +79,8 @@ export default function MessagesView({ currentUser, profiles, defaultRecipientId
           <div className="space-y-2">
             {normalizedSearch && results.length === 0 ? (
               <p className="rounded-2xl border border-white/5 bg-white/5 px-3 py-3 text-xs text-zinc-500">No users found for that search.</p>
+            ) : !normalizedSearch && friendIds.length === 0 ? (
+              <p className="rounded-2xl border border-white/5 bg-white/5 px-3 py-3 text-xs text-zinc-500">Add friends first to start direct messages.</p>
             ) : (
               results.map(profile => (
                 <button
