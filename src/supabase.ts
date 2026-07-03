@@ -33,16 +33,13 @@ export const isSupabaseConfigured =
   !supabaseUrl.includes('YOUR_') && 
   !supabaseAnonKey.includes('YOUR_');
 
-// Initialize the client. If not configured, we create a dummy client or export null 
-// so that compile doesn't fail, and we handle the offline fallback gracefully.
-export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        detectSessionInUrl: true
-      }
-    })
-  : null;
+// Initialize the client. The actual connection validity is controlled by isSupabaseConfigured.
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    detectSessionInUrl: true
+  }
+});
 
 // Export helpers for the client if they want to check configuration status
 export const getSupabaseConfig = () => ({

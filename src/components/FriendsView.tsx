@@ -3,6 +3,7 @@ import type React from 'react';
 import { Check, MessageSquare, Search, UserPlus, X } from 'lucide-react';
 import { Friendship, Profile } from '../types';
 import { db } from '../services/db';
+import { useToast } from './Toast';
 
 interface FriendsViewProps {
   currentUser: Profile;
@@ -33,6 +34,8 @@ export default function FriendsView({ currentUser, profiles, setActiveTab }: Fri
     loadFriendships();
   }, [currentUser.id]);
 
+  const toast = useToast();
+
   const profileById = useMemo(() => new Map(profiles.map(profile => [profile.id, profile])), [profiles]);
 
   const getOtherUserId = (friendship: Friendship) =>
@@ -57,29 +60,43 @@ export default function FriendsView({ currentUser, profiles, setActiveTab }: Fri
     try {
       await db.sendFriendRequest(currentUser.id, profileId);
       setMessage('Friend request sent.');
+      toast.show('Friend request sent.', 'success');
       await loadFriendships();
     } catch (err: any) {
-      setMessage(err.message || 'Could not send friend request.');
+      console.error('Could not send friend request:', err);
+      const message = 'Could not send friend request.';
+      setMessage(message);
+      toast.show(message, 'error');
     }
   };
 
   const updateStatus = async (friendshipId: string, status: Friendship['status']) => {
     try {
       await db.updateFriendshipStatus(friendshipId, status);
-      setMessage(status === 'accepted' ? 'Friend request accepted.' : 'Request updated.');
+      const successMsg = status === 'accepted' ? 'Friend request accepted.' : 'Request updated.';
+      setMessage(successMsg);
+      toast.show(successMsg, 'success');
       await loadFriendships();
     } catch (err: any) {
-      setMessage(err.message || 'Could not update friend request.');
+      console.error('Could not update friend request:', err);
+      const message = 'Could not update friend request.';
+      setMessage(message);
+      toast.show(message, 'error');
     }
   };
 
   const removeFriend = async (friendshipId: string) => {
     try {
       await db.removeFriendship(friendshipId);
-      setMessage('Friend connection removed.');
+      const msg = 'Friend connection removed.';
+      setMessage(msg);
+      toast.show(msg, 'success');
       await loadFriendships();
     } catch (err: any) {
-      setMessage(err.message || 'Could not remove friend.');
+      console.error('Could not remove friend:', err);
+      const message = 'Could not remove friend.';
+      setMessage(message);
+      toast.show(message, 'error');
     }
   };
 

@@ -5,6 +5,7 @@ import { Send, MessageSquare, Search, Shield, Award, ImagePlus, Paperclip, Spark
 import { Reply, Eye, Video } from 'lucide-react';
 import { ChatMessage, Profile } from '../types';
 import { db } from '../services/db';
+import { useToast } from './Toast';
 import { supabase, isSupabaseConfigured } from '../supabase';
 
 interface ChatBoxProps {
@@ -15,9 +16,11 @@ interface ChatBoxProps {
   defaultRecipientId?: string;
   hostId?: string;
   allowedRecipientIds?: string[];
+  simpleMode?: boolean;
 }
 
-export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat", profiles = [], defaultRecipientId, hostId, allowedRecipientIds }: ChatBoxProps) {
+export default function ChatBox({ currentUser, tournamentId, title = "Tournament Chat", profiles = [], defaultRecipientId, hostId, allowedRecipientIds, simpleMode = false }: ChatBoxProps) {
+  const toast = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -50,6 +53,8 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
     : [{ id: 'tournament', username: 'Tournament Chat' }, ...availableRecipients];
 
   const quickReplies = ['Let’s go!', 'Ready', 'Need a rematch', 'Great game'];
+  const showAttachmentControls = !simpleMode;
+  const showTypingAndSearch = !simpleMode;
 
   const getDmChannelId = (userA: string, userB: string) => {
     if (!userA || !userB) return '';
@@ -225,7 +230,7 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
       setViewOnce(false);
     } catch (err) {
       console.error('Failed to send message:', err);
-      alert(err instanceof Error ? err.message : 'Failed to send message.');
+      toast.show('Failed to send message. Please try again.', 'error');
     } finally {
       setIsSending(false);
       setIsUploadingMedia(false);
@@ -392,15 +397,17 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
             <option value="global" disabled>No available recipients</option>
           )}
         </select>
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
-          <input
-            value={recipientSearch}
-            onChange={(e) => setRecipientSearch(e.target.value)}
-            placeholder={allowedRecipientIds ? 'Search friends' : 'Search users'}
-            className="w-full rounded-xl border border-white/10 bg-black/30 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder-zinc-500"
-          />
-        </div>
+        {showTypingAndSearch && (
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={recipientSearch}
+              onChange={(e) => setRecipientSearch(e.target.value)}
+              placeholder={allowedRecipientIds ? 'Search friends' : 'Search users'}
+              className="w-full rounded-xl border border-white/10 bg-black/30 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder-zinc-500"
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3.5 min-h-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.08),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)]">
@@ -476,31 +483,35 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
                     );
                   })()}
                   <div className="flex items-center gap-2 mt-1">
-                    <button type="button" onClick={() => setReplyTo(msg)} className="text-[10px] text-zinc-400 hover:text-cyan-300">Reply</button>
-                    {!isMe ? (
+                    {showAttachmentControls && (
+                      <button type="button" onClick={() => setReplyTo(msg)} className="text-[10px] text-zinc-400 hover:text-cyan-300">Reply</button>
+                    )}
+                    {!isMe && showAttachmentControls ? (
                       <button type="button" onClick={() => setViewOnce(true)} className="text-[10px] text-zinc-400 hover:text-cyan-300">View once</button>
                     ) : null}
                   </div>
 
-                  <div className="flex items-center gap-2 mt-1">
-                    {/* Existing reactions */}
-                    {Object.entries(reactionsMap[msg.id] || {}).map(([emoji, info]) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => handleToggleReaction(msg.id, emoji)}
-                        className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] ${info.byUser.includes(currentUser.id) ? 'bg-cyan-600/20 text-cyan-200' : 'bg-white/5 text-zinc-300'}`}
-                      >
-                        <span>{emoji}</span>
-                        <span className="text-[10px]">{info.count}</span>
-                      </button>
-                    ))}
+                  {showAttachmentControls && (
+                    <div className="flex items-center gap-2 mt-1">
+                      {/* Existing reactions */}
+                      {Object.entries(reactionsMap[msg.id] || {}).map(([emoji, info]) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleToggleReaction(msg.id, emoji)}
+                          className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] ${info.byUser.includes(currentUser.id) ? 'bg-cyan-600/20 text-cyan-200' : 'bg-white/5 text-zinc-300'}`}
+                        >
+                          <span>{emoji}</span>
+                          <span className="text-[10px]">{info.count}</span>
+                        </button>
+                      ))}
 
-                    {/* Quick add reactions */}
-                    {['👍','❤️','🔥','😂','🎉'].map(e => (
-                      <button key={e} type="button" onClick={() => handleToggleReaction(msg.id, e)} className="text-[13px] text-zinc-400 hover:text-cyan-300">{e}</button>
-                    ))}
-                  </div>
+                      {/* Quick add reactions */}
+                      {['👍','❤️','🔥','😂','🎉'].map(e => (
+                        <button key={e} type="button" onClick={() => handleToggleReaction(msg.id, e)} className="text-[13px] text-zinc-400 hover:text-cyan-300">{e}</button>
+                      ))}
+                    </div>
+                  )}
                   {isMe ? (
                     <div className="flex items-center justify-end gap-1 text-[9px] text-zinc-500">
                       <CheckCheck className="h-3 w-3" /> Sent
@@ -514,20 +525,22 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
       </div>
 
       <div className="border-t border-white/10 bg-zinc-950/70 px-3 py-2">
-        <div className="mb-2 flex flex-wrap gap-2">
-          {quickReplies.map((reply) => (
-            <button
-              key={reply}
-              type="button"
-              onClick={() => setInputText(reply)}
-              className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-zinc-300 transition-colors hover:border-cyan-500/30 hover:text-cyan-300"
-            >
-              {reply}
-            </button>
-          ))}
-        </div>
+{showAttachmentControls && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {quickReplies.map((reply) => (
+              <button
+                key={reply}
+                type="button"
+                onClick={() => setInputText(reply)}
+                className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-zinc-300 transition-colors hover:border-cyan-500/30 hover:text-cyan-300"
+              >
+                {reply}
+              </button>
+            ))}
+          </div>
+        )}
 
-        {replyTo ? (
+        {showAttachmentControls && replyTo ? (
           <div className="mb-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/30 p-2">
             <div className="min-w-0 flex-1 text-[11px] text-zinc-300">
               Replying to <strong className="text-zinc-100">{replyTo.username}</strong>: {JSON.parse(replyTo.content || '""')?.text || replyTo.content}
@@ -536,16 +549,18 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
           </div>
         ) : null}
 
-        <div className="mb-2 flex items-center gap-2">
-          <button type="button" onClick={() => fileInputRef.current?.click()} className="flex h-8 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 text-xs text-zinc-300">
-            <Paperclip className="h-4 w-4" /> Attach
-          </button>
-          <label className="flex items-center gap-2 text-xs text-zinc-300">
-            <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleFileChange} />
-            <input type="checkbox" checked={viewOnce} onChange={() => setViewOnce(v => !v)} /> <span>View once</span>
-          </label>
-        </div>
-        {attachmentPreview ? (
+        {showAttachmentControls && (
+          <div className="mb-2 flex items-center gap-2">
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="flex h-8 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 text-xs text-zinc-300">
+              <Paperclip className="h-4 w-4" /> Attach
+            </button>
+            <label className="flex items-center gap-2 text-xs text-zinc-300">
+              <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleFileChange} />
+              <input type="checkbox" checked={viewOnce} onChange={() => setViewOnce(v => !v)} /> <span>View once</span>
+            </label>
+          </div>
+        )}
+        {showAttachmentControls && attachmentPreview ? (
           <div className="mb-2 flex items-center gap-2 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-2">
             <img src={attachmentPreview} alt="Preview" className="h-10 w-10 rounded-xl object-cover" />
             <div className="min-w-0 flex-1">
@@ -566,14 +581,18 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
         ) : null}
 
         <form onSubmit={handleSendMessage} className="flex items-end gap-2">
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-300 transition-colors hover:border-cyan-500/30 hover:text-cyan-300"
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+          {showAttachmentControls && (
+            <>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-300 transition-colors hover:border-cyan-500/30 hover:text-cyan-300"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+            </>
+          )}
           <div className="flex-1">
             <textarea
               value={inputText}

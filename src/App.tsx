@@ -9,8 +9,10 @@ import { Profile, Tournament, Game, Notification } from './types';
 import { db, ensureDbSeeded } from './services/db';
 import { isSupabaseConfigured, getSupabaseConfig, supabase } from './supabase';
 import Navbar from './components/Navbar';
+import { useToast } from './components/Toast';
 import DashboardView from './components/DashboardView';
 import TournamentsView from './components/TournamentsView';
+import EmbedView from './components/EmbedView';
 import LeaderboardView from './components/LeaderboardView';
 import AchievementsView from './components/AchievementsView';
 import OrganizerView from './components/OrganizerView';
@@ -18,8 +20,10 @@ import SettingsView from './components/SettingsView';
 import MessagesView from './components/MessagesView';
 import FriendsView from './components/FriendsView';
 import FriendlyMatchesView from './components/FriendlyMatchesView';
+import ErrorBoundary from './components/ErrorBoundary';
 
 export default function App() {
+  const toast = useToast();
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authEmail, setAuthEmail] = useState('');
@@ -37,6 +41,7 @@ export default function App() {
   const [unreadDmCount, setUnreadDmCount] = useState(0);
   const [pendingFriendChallengesCount, setPendingFriendChallengesCount] = useState(0);
   const [selectedTournamentId, setSelectedTournamentId] = useState<string | null>(null);
+  const [embedTournamentId, setEmbedTournamentId] = useState<string | null>(null);
   const [appDataError, setAppDataError] = useState<string | null>(null);
 
   // Refresh helper
@@ -92,9 +97,33 @@ export default function App() {
     };
   }, []);
 
+  // Handle embed route support without regular page navigation
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const path = window.location.pathname.split('/').filter(Boolean);
+    if (path[0] === 'embed' && path[1] === 'tournament' && path[2]) {
+      setEmbedTournamentId(path[2]);
+      return;
+    }
+
+    if (!tournaments.length) return;
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tournamentParam = params.get('tournament') || params.get('t');
+      if (tournamentParam && tournaments.some(t => t.id === tournamentParam)) {
+        setSelectedTournamentId(tournamentParam);
+        setActiveTab('tournaments');
+      }
+    } catch (err) {
+      console.warn('Unable to parse tournament deep link from URL.', err);
+    }
+  }, [tournaments]);
+
   // Fetch application data
   useEffect(() => {
     if (!currentUser) return;
+    const userId = currentUser.id;
 
     async function loadAppData() {
       try {
@@ -104,8 +133,8 @@ export default function App() {
           db.getTournaments(),
           db.getGames(),
           db.getProfiles(),
-          db.getNotifications(currentUser.id),
-          db.getUnreadDmCount(currentUser.id),
+          db.getNotifications(userId),
+          db.getUnreadDmCount(userId),
           db.getFriendChallenges()
         ]);
 
@@ -114,7 +143,7 @@ export default function App() {
 
         if (failedResults.length) {
           console.error('Some app data failed to load:', failedResults.map(result => result.reason));
-          setAppDataError('Some live data could not be loaded. Check your Supabase schema and refresh.');
+          setAppDataError("Couldn't load some live data right now. Please refresh.");
         }
 
         const tournamentsData = tournamentsResult.status === 'fulfilled' ? tournamentsResult.value : tournaments;
@@ -123,7 +152,7 @@ export default function App() {
         const notificationsData = notificationsResult.status === 'fulfilled' ? notificationsResult.value : notifications;
         const unreadDmData = unreadDmResult.status === 'fulfilled' ? unreadDmResult.value : unreadDmCount;
         const friendChallengesData = friendChallengesResult.status === 'fulfilled' ? friendChallengesResult.value : [];
-        const pendingFriendCount = friendChallengesData.filter((challenge) => challenge.status === 'pending' && challenge.opponent_id === currentUser.id).length;
+        const pendingFriendCount = friendChallengesData.filter((challenge) => challenge.status === 'pending' && challenge.opponent_id === userId).length;
 
         console.info('[App] Loaded app data', {
           tournaments: tournamentsData.length,
@@ -145,7 +174,7 @@ export default function App() {
         setPendingFriendChallengesCount(pendingFriendCount);
       } catch (err) {
         console.error('Error loading app data:', err);
-        setAppDataError('Live data failed to load. Check your Supabase connection and refresh.');
+        setAppDataError("Couldn't load live data right now. Please refresh.");
       }
     }
     loadAppData();
@@ -161,7 +190,7 @@ export default function App() {
     setAuthError(null);
 
     if (!isSupabaseConfigured || !supabase) {
-      setAuthError("Supabase environment variables are missing. Please use Sandbox quick login!");
+      setAuthError('The app is not fully configured yet.');
       return;
     }
 
@@ -216,23 +245,23 @@ export default function App() {
         if (error) throw error;
         
         if (data.user) {
-          alert("Registration successful! If your Supabase project requires email confirmation, please check your inbox to confirm. Otherwise, you can sign in directly now!");
+          toast.show("Registration successful! If your Supabase project requires email confirmation, please check your inbox to confirm.", 'success');
           setAuthMode('signin');
         }
       }
     } catch (err: any) {
       console.error("Auth error:", err);
-      setAuthError(err.message || "An authentication error occurred.");
+      setAuthError('Authentication failed. Please check your details and try again.');
     }
   };
 
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(129,140,248,0.16),transparent_34%),#05070b] text-zinc-100 flex flex-col items-center justify-center p-4">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-black font-extrabold animate-bounce mb-4 shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+      <div className="et-light min-h-screen bg-[#F5F6F8] text-gray-950 flex flex-col items-center justify-center p-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-600 text-white font-extrabold animate-bounce mb-4 shadow-sm">
           <Trophy className="h-6 w-6" />
         </div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-cyan-400">Loading KickOff Arena...</p>
+        <p className="text-xs font-semibold uppercase tracking-widest text-cyan-700">Loading eTournament...</p>
       </div>
     );
   }
@@ -240,69 +269,63 @@ export default function App() {
   // FORCE SUPABASE CONFIGURATION IN LIVE MODE
   if (!isSupabaseConfigured) {
     return (
-      <div className="min-h-screen bg-[#050505] text-zinc-100 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-        {/* Glow effect backdrops */}
-        <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-red-500/5 blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 h-96 w-96 rounded-full bg-amber-500/5 blur-3xl" />
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-sky-50 to-slate-100 text-slate-900 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_22%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.10),transparent_24%)]" />
 
-        <div className="w-full max-w-lg space-y-6 relative z-10">
+        <div className="relative z-10 w-full max-w-lg space-y-6">
           <div className="text-center space-y-3">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-red-600 text-black font-black shadow-[0_0_30px_rgba(245,158,11,0.25)]">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-br from-cyan-400 to-sky-300 text-slate-950 shadow-[0_24px_80px_rgba(56,189,248,0.18)]">
               <Info className="h-6 w-6" />
             </div>
             <div className="space-y-1">
-              <h1 className="text-2xl font-black tracking-tight text-white uppercase">
-                Database Connection <span className="text-amber-400">Required</span>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+                Database connection required
               </h1>
-              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-widest">KickOff Arena Live Mode</p>
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">eTournament live mode</p>
             </div>
           </div>
 
-          <div className="rounded-[32px] border border-white/10 bg-zinc-950/60 p-6 sm:p-8 shadow-[0_30px_90px_rgba(0,0,0,0.35)] backdrop-blur-xl space-y-6 text-left">
-            <p className="text-xs text-zinc-300 leading-relaxed">
-              This application has been set to <strong>Live Mode</strong> and requires a connected <strong>Supabase Database</strong>. Offline LocalStorage simulation is disabled.
+          <div className="rounded-4xl border border-slate-200/70 bg-white shadow-xl p-6 sm:p-8 space-y-6">
+            <p className="text-sm text-slate-700 leading-relaxed">
+              This app is in <strong className="text-slate-950">Live Mode</strong> and requires a configured <strong className="text-cyan-600">Supabase database</strong>. Offline simulation is disabled.
             </p>
 
             <div className="space-y-4">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider border-b border-white/5 pb-2">Configuration Steps</h3>
+              <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-[0.18em] border-b border-slate-200 pb-2">Configuration Steps</h3>
               
-              <div className="space-y-3 text-xs">
+              <div className="space-y-3 text-sm text-slate-600">
                 <div className="flex gap-3">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-400 font-bold">1</div>
-                  <div className="text-zinc-400">
-                    <p className="font-semibold text-zinc-200">Create a Supabase Project</p>
-                    <p className="mt-0.5">Go to the <a href="https://database.new" target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">Supabase Dashboard</a> and start a new project.</p>
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-100 text-cyan-700 font-semibold">1</div>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-slate-900">Create a Supabase Project</p>
+                    <p className="text-slate-500">Open the <a href="https://database.new" target="_blank" rel="noreferrer" className="text-cyan-600 hover:underline">Supabase Dashboard</a> and start a new project.</p>
                   </div>
                 </div>
 
                 <div className="flex gap-3">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-400 font-bold">2</div>
-                  <div className="text-zinc-400">
-                    <p className="font-semibold text-zinc-200">Run the Database Schema</p>
-                    <p className="mt-0.5">Copy the entire query from <code className="text-zinc-200 bg-white/5 px-1 py-0.5 rounded">/supabase/schema.sql</code> and execute it in your Supabase SQL Editor.</p>
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-100 text-cyan-700 font-semibold">2</div>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-slate-900">Apply the database schema</p>
+                    <p className="text-slate-500">Run the SQL from <code className="rounded-xl bg-slate-100 px-2 py-1 text-xs text-cyan-700">/supabase/schema.sql</code>.</p>
                   </div>
                 </div>
 
                 <div className="flex gap-3">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-400 font-bold">3</div>
-                  <div className="text-zinc-400">
-                    <p className="font-semibold text-zinc-200">Set Environment Variables</p>
-                    <p className="mt-0.5">Create a <code className="text-zinc-200 bg-white/5 px-1 py-0.5 rounded">.env</code> file in the project root and add your project variables:</p>
-                    <pre className="mt-2 p-3 bg-black/40 rounded-xl text-[10px] text-amber-300 font-mono border border-white/5 overflow-x-auto">
-{`VITE_SUPABASE_URL="https://your-project.supabase.co"
-VITE_SUPABASE_ANON_KEY="your-anon-key"`}
-                    </pre>
-                    <p className="text-[10px] text-zinc-400 mt-2">
-                      Use a <code className="text-zinc-200 bg-white/5 px-1 py-0.5 rounded">.env.local</code> file at the project root and restart the dev server.
-                    </p>
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-100 text-cyan-700 font-semibold">3</div>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-slate-900">Set environment variables</p>
+                    <p className="text-slate-500">Create a <code className="rounded-xl bg-slate-100 px-2 py-1 text-xs text-cyan-700">.env</code> file with your Supabase values.</p>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="text-center pt-2">
-              <p className="text-[10px] text-zinc-500">Restart your development server after configuring the environment variables.</p>
-            </div>
+            <pre className="mt-2 overflow-x-auto rounded-3xl border border-slate-200 bg-slate-50 p-4 text-[11px] text-slate-700 font-mono">
+VITE_SUPABASE_URL="https://your-project.supabase.co"
+VITE_SUPABASE_ANON_KEY="your-anon-key"
+            </pre>
+
+            <p className="text-[11px] text-slate-500">Restart your dev server after updating <code className="rounded-xl bg-slate-100 px-2 py-1 text-xs text-cyan-700">.env</code>.</p>
           </div>
         </div>
       </div>
@@ -312,37 +335,29 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"`}
   // RENDER LOGIN SCREEN
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-[#050505] text-zinc-100 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-        
-        {/* Glow effect backdrops */}
-        <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 h-96 w-96 rounded-full bg-indigo-500/5 blur-3xl" />
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-sky-50 to-white text-slate-950 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_20%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,0.08),transparent_22%)]" />
 
-        <div className="w-full max-w-md space-y-6 relative z-10">
-          
-          {/* Logo Heading */}
+        <div className="relative z-10 w-full max-w-md space-y-6">
           <div className="text-center space-y-3">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-black font-black shadow-[0_0_30px_rgba(6,182,212,0.35)]">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-br from-cyan-400 to-sky-300 text-slate-950 font-black shadow-[0_24px_80px_rgba(56,189,248,0.18)]">
               <Trophy className="h-6 w-6" />
             </div>
             <div className="space-y-1">
-              <h1 className="text-2xl font-black tracking-tight text-white uppercase">
-                KICK<span className="text-cyan-400">OFF</span>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+                eTournament
               </h1>
-              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-widest">Esports Tournament Arena</p>
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Competitive tournament platform</p>
             </div>
           </div>
 
-          {/* Login Credentials Box */}
-          <div className="rounded-[32px] border border-white/10 bg-zinc-950/60 p-6 sm:p-8 shadow-[0_30px_90px_rgba(0,0,0,0.35)] backdrop-blur-xl space-y-6">
-            
-            {/* Mode Switcher */}
-            <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-xl">
+          <div className="rounded-4xl border border-slate-200 bg-white shadow-xl p-6 sm:p-8 space-y-6">
+            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5">
               <button 
                 type="button"
                 onClick={() => { setAuthMode('signin'); setAuthError(null); }}
-                className={`py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                  authMode === 'signin' ? 'bg-cyan-500 text-black shadow-md' : 'text-zinc-400 hover:text-white'
+                className={`rounded-2xl py-2 text-xs font-semibold transition ${
+                  authMode === 'signin' ? 'bg-cyan-500 text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
                 Sign In
@@ -350,72 +365,73 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"`}
               <button 
                 type="button"
                 onClick={() => { setAuthMode('signup'); setAuthError(null); }}
-                className={`py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                  authMode === 'signup' ? 'bg-cyan-500 text-black shadow-md' : 'text-zinc-400 hover:text-white'
+                className={`rounded-2xl py-2 text-xs font-semibold transition ${
+                  authMode === 'signup' ? 'bg-cyan-500 text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
                 Sign Up
               </button>
             </div>
 
-            {/* Real Supabase Auth form */}
             <form onSubmit={handleAuthSubmit} className="space-y-4 text-left">
               <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider">Email Address</label>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-[0.2em]">Email Address</label>
                 <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <input 
                     type="email" 
-                    placeholder="e.g. okon@kickoff.gg" 
+                    placeholder="e.g. okon@etournament.gg" 
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500/50"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-3xl pl-11 pr-4 py-3 text-sm text-slate-950 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
                   />
                 </div>
               </div>
 
               {authMode === 'signup' && (
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider">Username</label>
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-[0.2em]">Username</label>
                   <div className="relative">
-                    <Gamepad2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                    <Gamepad2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <input 
                       type="text" 
                       placeholder="e.g. clutch_king" 
                       value={authUsername}
                       onChange={(e) => setAuthUsername(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500/50"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-3xl pl-11 pr-4 py-3 text-sm text-slate-950 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
                     />
                   </div>
                 </div>
               )}
 
               <div className="space-y-1.5">
-                <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider">Password</label>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-[0.2em]">Password</label>
                 <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <input 
                     type="password" 
                     placeholder="••••••••" 
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500/50"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-3xl pl-11 pr-4 py-3 text-sm text-slate-950 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
                   />
                 </div>
               </div>
 
               {authError && (
-                <p className="text-[10px] text-red-400 font-bold bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-lg">
+                <p className="text-sm text-red-600 font-semibold bg-red-50 border border-red-200 px-4 py-3 rounded-3xl">
                   ⚠️ {authError}
                 </p>
               )}
 
               <button 
                 type="submit"
-                className="w-full py-2.5 bg-linear-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-[0_4px_20px_rgba(6,182,212,0.15)]"
+                className="w-full rounded-3xl bg-gradient-to-r from-cyan-500 to-sky-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.15em] text-slate-950 shadow-[0_8px_32px_rgba(56,189,248,0.18)] transition-transform hover:-translate-y-0.5"
               >
-                <LogIn className="h-4 w-4" />
-                {authMode === 'signin' ? 'Authenticate via Supabase' : 'Create Supabase Account'}
+                <div className="flex items-center justify-center gap-2">
+                  <LogIn className="h-4 w-4" />
+                  {authMode === 'signin' ? 'Sign in securely' : 'Create account'}
+                </div>
               </button>
             </form>
 
@@ -426,13 +442,17 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"`}
     );
   }
 
+  if (embedTournamentId) {
+    return <EmbedView tournamentId={embedTournamentId} />;
+  }
+
   // RENDER AUTHENTICATED PLATFORM MAIN DASHBOARD
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(129,140,248,0.16),transparent_34%),#05070b] text-zinc-100 flex flex-col font-sans pb-28 relative overflow-hidden">
+    <div className="min-h-screen bg-[#f8fbff] text-slate-950 flex flex-col font-sans pb-[calc(5.5rem+env(safe-area-inset-bottom))] relative overflow-x-hidden">
       
       {/* Immersive background blurs */}
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-cyan-600/10 blur-[120px] -z-10 rounded-full" />
-      <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-indigo-600/10 blur-[100px] -z-10 rounded-full" />
+      <div className="absolute top-0 right-0 w-130 h-130 bg-cyan-200/70 blur-[140px] -z-10 rounded-full" />
+      <div className="absolute bottom-0 left-0 w-80 h-80 bg-sky-100/80 blur-[110px] -z-10 rounded-full" />
 
       {/* Dynamic Navbar */}
       <Navbar 
@@ -460,63 +480,82 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"`}
         )}
 
         {activeTab === 'dashboard' && (
-          <DashboardView 
-            currentUser={currentUser} 
-            tournaments={tournaments} 
-            games={games} 
-            setActiveTab={setActiveTab}
-            setSelectedTournamentId={setSelectedTournamentId}
-          />
+          <ErrorBoundary label="Dashboard">
+            <DashboardView 
+              currentUser={currentUser} 
+              tournaments={tournaments} 
+              games={games} 
+              setActiveTab={setActiveTab}
+              setSelectedTournamentId={setSelectedTournamentId}
+              onRefreshApp={handleRefreshData}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'tournaments' && (
-          <TournamentsView 
-            currentUser={currentUser} 
-            tournaments={tournaments} 
-            games={games} 
-            profiles={profiles}
-            onRefreshTournaments={handleRefreshData}
-            selectedTournamentId={selectedTournamentId}
-            setSelectedTournamentId={setSelectedTournamentId}
-          />
+          <ErrorBoundary label="Tournaments">
+            <TournamentsView 
+              currentUser={currentUser} 
+              tournaments={tournaments} 
+              games={games} 
+              profiles={profiles}
+              onRefreshTournaments={handleRefreshData}
+              selectedTournamentId={selectedTournamentId}
+              setSelectedTournamentId={setSelectedTournamentId}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'leaderboard' && (
-          <LeaderboardView games={games} tournaments={tournaments} />
+          <ErrorBoundary label="Leaderboard">
+            <LeaderboardView games={games} tournaments={tournaments} />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'achievements' && (
-          <AchievementsView currentUserId={currentUser.id} />
+          <ErrorBoundary label="Achievements">
+            <AchievementsView currentUserId={currentUser?.id ?? ''} />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'messages' && (
-          <MessagesView currentUser={currentUser} profiles={profiles} />
+          <ErrorBoundary label="Messages">
+            <MessagesView currentUser={currentUser} profiles={profiles} />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'friends' && (
-          <FriendsView currentUser={currentUser} profiles={profiles} setActiveTab={setActiveTab} />
+          <ErrorBoundary label="Friends">
+            <FriendsView currentUser={currentUser} profiles={profiles} setActiveTab={setActiveTab} />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'friendly' && (
-          <FriendlyMatchesView currentUser={currentUser} profiles={profiles} games={games} setActiveTab={setActiveTab} onRefreshApp={handleRefreshData} />
+          <ErrorBoundary label="Friendly matches">
+            <FriendlyMatchesView currentUser={currentUser} profiles={profiles} games={games} setActiveTab={setActiveTab} onRefreshApp={handleRefreshData} />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'organizer' && (
-          <OrganizerView 
-            currentUser={currentUser} 
-            tournaments={tournaments} 
-            profiles={profiles}
-            setActiveTab={setActiveTab}
-            setSelectedTournamentId={setSelectedTournamentId}
-            onRefreshTournaments={handleRefreshData}
-          />
+          <ErrorBoundary label="Organizer">
+            <OrganizerView 
+              currentUser={currentUser} 
+              tournaments={tournaments} 
+              profiles={profiles}
+              setActiveTab={setActiveTab}
+              setSelectedTournamentId={setSelectedTournamentId}
+              onRefreshTournaments={handleRefreshData}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'settings' && (
-          <SettingsView 
-            currentUser={currentUser} 
-            onRefreshProfile={handleRefreshData} 
-          />
+          <ErrorBoundary label="Settings">
+            <SettingsView 
+              currentUser={currentUser} 
+              onRefreshProfile={handleRefreshData} 
+            />
+          </ErrorBoundary>
         )}
       </main>
 

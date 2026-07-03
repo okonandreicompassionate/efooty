@@ -10,6 +10,7 @@ import {
   TournamentStatus, TournamentFormat, PlayerRegistrationStatus, TournamentRosterCount
 } from '../types';
 import { db } from '../services/db';
+import { useToast } from './Toast';
 import { supabase, isSupabaseConfigured } from '../supabase';
 import BracketTree from './BracketTree';
 import ChatBox from './ChatBox';
@@ -64,6 +65,8 @@ export default function TournamentsView({
   const [proofUrlInput, setProofUrlInput] = useState<string>('');
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [submittingScore, setSubmittingScore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
   const [hostForm, setHostForm] = useState({
     title: '',
     description: '',
@@ -78,10 +81,69 @@ export default function TournamentsView({
     payment_provider: 'none' as 'none' | 'paystack',
     registration_note: '',
     auto_lock_registration: true,
-    points_only: false
+    points_only: false,
+    slot_minutes: '90'
   });
 
-  // Fetch detail information when selected tournament changes
+  const toast = useToast();
+  const [rescheduleTime, setRescheduleTime] = useState<string>('');
+  const [showEmbedCode, setShowEmbedCode] = useState(false);
+
+  const getSignupLink = (tournamentId: string) => {
+    if (typeof window === 'undefined') return '';
+    return `${window.location.origin}/?tournament=${tournamentId}&invite=1`;
+  };
+
+  const getEmbedCode = (tournamentId: string) => {
+    if (typeof window === 'undefined') return '';
+    const src = `${window.location.origin}/embed/tournament/${tournamentId}`;
+    return `<iframe src="${src}" width="100%" height="700" style="border:0;min-height:450px;"></iframe>`;
+  };
+
+  const handleGenerateSchedule = async () => {
+    if (!activeTournament) return;
+    try {
+      setActionLoading(true);
+      const generated = await db.generateSchedule(activeTournament.id, { slot_minutes: 120 });
+      if (generated.length === 0) {
+        toast.show('All matches already have schedule slots.', 'info');
+      } else {
+        toast.show('Schedule generated for unscheduled matches.', 'success');
+      }
+      await loadTournamentDetails(activeTournament.id);
+    } catch (err: any) {
+      toast.show('Failed to generate schedule. Please try again.', 'error');
+      console.error('generateSchedule error:', err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRescheduleMatch = async () => {
+    if (!selectedMatch) return;
+    try {
+      setActionLoading(true);
+      const iso = rescheduleTime ? new Date(rescheduleTime).toISOString() : null;
+      await db.rescheduleMatch(selectedMatch.id, iso);
+      toast.show('Match rescheduled successfully.', 'success');
+      await loadTournamentDetails(selectedMatch.tournament_id);
+      setSelectedMatch(null);
+    } catch (err: any) {
+      toast.show('Could not reschedule match. Please try again.', 'error');
+      console.error('rescheduleMatch error:', err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedMatch?.scheduled_time) {
+      setRescheduleTime(formatLocalInputValue(selectedMatch.scheduled_time));
+    } else {
+      setRescheduleTime('');
+    }
+  }, [selectedMatch]);
+
   useEffect(() => {
     if (isUuid(selectedTournamentId)) {
       loadTournamentDetails(selectedTournamentId);
@@ -90,6 +152,21 @@ export default function TournamentsView({
       setMatches([]);
     }
   }, [selectedTournamentId, tournaments]);
+
+  useEffect(() => {
+    if (!selectedTournamentId) {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const tournamentParam = params.get('tournament') || params.get('t');
+        if (tournamentParam && tournaments.some(t => t.id === tournamentParam)) {
+          setSelectedTournamentId(tournamentParam);
+          setDetailTab('overview');
+        }
+      } catch (e) {
+        console.warn('Unable to parse URL params for tournament deep link.', e);
+      }
+    }
+  }, [selectedTournamentId, tournaments, setSelectedTournamentId]);
 
   useEffect(() => {
     db.getRosterCounts()
@@ -138,6 +215,12 @@ export default function TournamentsView({
   const activeTournament = tournaments.find(t => t.id === selectedTournamentId);
   const isRegistered = registrations.some(r => r.player_id === currentUser.id);
   const myRegistration = registrations.find(r => r.player_id === currentUser.id);
+  const totalPages = Math.max(1, Math.ceil(filteredTournaments.length / itemsPerPage));
+  const paginatedTournaments = filteredTournaments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, selectedGameFilter, selectedStatusFilter, tournaments.length]);
   const activeRosterCount = activeTournament
     ? rosterCounts.find(count => count.tournament_id === activeTournament.id) || {
         tournament_id: activeTournament.id,
@@ -153,6 +236,20 @@ export default function TournamentsView({
   const isActiveHost = Boolean(activeTournament && activeTournament.organizer_id === currentUser.id);
   const canManageActiveTournament = Boolean(activeTournament && (currentUser.role === 'admin' || isActiveHost));
 
+  useEffect(() => {
+    if (!activeTournament) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const invite = params.get('invite') || params.get('signup');
+      const tournamentParam = params.get('tournament') || params.get('t');
+      if (invite && tournamentParam === activeTournament.id && activeTournament.status === 'registration' && !isRegistered) {
+        setShowRegistrationModal(true);
+      }
+    } catch (e) {
+      console.warn('Unable to parse URL params for tournament invite.', e);
+    }
+  }, [activeTournament, selectedTournamentId, isRegistered]);
+
   const getProfileDisplayName = (profile?: Profile | null, fallback?: string) => {
     const candidate = profile?.username?.trim() || fallback?.trim();
     return candidate || 'Player';
@@ -162,6 +259,14 @@ export default function TournamentsView({
     if (!value) return 'TBD';
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? 'TBD' : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  };
+
+  const formatLocalInputValue = (value?: string) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const tzOffsetMs = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - tzOffsetMs).toISOString().slice(0, 16);
   };
 
   const approvedMembers = registrations.filter(reg => reg.status === 'approved' && reg.player_id !== currentUser.id);
@@ -205,6 +310,10 @@ export default function TournamentsView({
       setRegistrationMessage('This tournament is full.');
       return;
     }
+    if (activeTournament?.status !== 'registration') {
+      setRegistrationMessage('Registration is closed for this tournament.');
+      return;
+    }
     setShowRegistrationModal(true);
     setRegistrationMessage(null);
     setPendingPaymentRegistrationId(null);
@@ -246,7 +355,8 @@ export default function TournamentsView({
         setShowRegistrationModal(false);
       }
     } catch (err: any) {
-      alert(err.message || 'Registration failed.');
+      console.error('Registration failed:', err);
+      toast.show('Registration failed. Please try again.', 'error');
     } finally {
       setRegistering(false);
     }
@@ -263,7 +373,8 @@ export default function TournamentsView({
       setRegistrationMessage('Payment reference submitted. The host will verify it before approval.');
       setShowRegistrationModal(false);
     } catch (err: any) {
-      alert(err.message || 'Payment reference submission failed.');
+      console.error('Payment reference submission failed:', err);
+      toast.show('Payment reference submission failed. Please try again.', 'error');
     }
   };
 
@@ -274,7 +385,8 @@ export default function TournamentsView({
       if (selectedTournamentId) await loadTournamentDetails(selectedTournamentId);
       onRefreshTournaments();
     } catch (err: any) {
-      alert(err.message || 'Payment approval failed.');
+      console.error('Payment approval failed:', err);
+      toast.show('Payment approval failed. Please try again.', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -289,7 +401,8 @@ export default function TournamentsView({
       if (selectedTournamentId) await loadTournamentDetails(selectedTournamentId);
       onRefreshTournaments();
     } catch (err: any) {
-      alert(err.message || 'Player action failed.');
+      console.error('Player action failed:', err);
+      toast.show('Player action failed. Please try again.', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -305,7 +418,8 @@ export default function TournamentsView({
         await loadTournamentDetails(selectedTournamentId);
       }
     } catch (err: any) {
-      alert(err.message || 'Action failed.');
+      console.error('Tournament action failed:', err);
+      toast.show('Action failed. Please try again.', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -321,10 +435,7 @@ export default function TournamentsView({
       await loadTournamentDetails(selectedTournamentId);
       setDetailTab('bracket');
     } catch (err: any) {
-      const message = err?.code === '42501' || err?.message?.toLowerCase().includes('row-level security') || err?.message?.toLowerCase().includes('forbidden')
-        ? 'Supabase blocked bracket creation because the matches table write policy is missing or your account is not the organizer/admin. Run supabase/fix_matches_rls.sql in the Supabase SQL Editor, sign in as the tournament organizer/admin, and try again.'
-        : err.message || 'Generating bracket failed.';
-      alert(message);
+      toast.show('Generating bracket failed. Please check organizer access and try again.', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -357,9 +468,10 @@ export default function TournamentsView({
       setSelectedMatch(null);
       setProofFile(null);
       setProofUrlInput('');
-      alert('Scorecard report submitted successfully. Waiting for organizer approval!');
+      toast.show('Scorecard report submitted successfully. Waiting for organizer approval!', 'success');
     } catch (err: any) {
-      alert(err.message || 'Score report failed.');
+      console.error('Score report failed:', err);
+      toast.show('Score report failed. Please try again.', 'error');
     } finally {
       setSubmittingScore(false);
     }
@@ -386,7 +498,8 @@ export default function TournamentsView({
 
       setSelectedMatch(null);
     } catch (err: any) {
-      alert(err.message || 'Verification failed.');
+      console.error('Verification failed:', err);
+      toast.show('Verification failed. Please try again.', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -404,7 +517,7 @@ export default function TournamentsView({
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-850/60 pb-5">
             <div>
-              <h1 className="text-2xl font-extrabold text-white tracking-tight">Browse Arenas</h1>
+              <h1 className="text-2xl font-extrabold text-white tracking-tight">Browse Tournaments</h1>
               <p className="text-sm text-gray-400">Join regional tournament series, view status, and climb ranks.</p>
             </div>
             
@@ -458,75 +571,91 @@ export default function TournamentsView({
           </div>
 
           {/* Tournaments Grid */}
-          {filteredTournaments.map(t => {
-            const game = games.find(g => g.id === t.game_id);
-            const count = rosterCounts.find(item => item.tournament_id === t.id);
-            const approvedCount = count?.approved || 0;
-            const pendingCount = count?.pending || 0;
-            const reservedCount = approvedCount + pendingCount;
-            const isFull = reservedCount >= t.max_players;
-                const isHost = t.organizer_id === currentUser.id;
-
-                return (
-                  <div 
-                    key={t.id}
-                    onClick={() => setSelectedTournamentId(t.id)}
-                    className="group flex flex-col h-full rounded-2xl border border-white/5 bg-zinc-950/40 hover:border-cyan-500/20 hover:bg-zinc-900/10 transition-all cursor-pointer shadow-lg backdrop-blur-sm"
-                  >
-                    {/* Header Banner */}
-                    <div className="h-36 relative overflow-hidden rounded-t-2xl">
-                      <img 
-                        src={t.banner_url || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800'} 
-                        alt={t.title}
-                        className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-500"
-                        referrerPolicy="no-referrer"
-                      />
-                      <span className={`absolute top-3 right-3 text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-full border backdrop-blur-md ${
-                        isFull && t.status === 'registration'
-                          ? 'bg-red-500/10 text-red-300 border-red-500/20'
-                          : t.status === 'registration' 
-                          ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' 
-                          : t.status === 'active' 
-                          ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' 
-                          : t.status === 'completed'
-                          ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-                          : 'bg-zinc-800 text-zinc-500 border-white/5'
-                      }`}>
-                        {isFull && t.status === 'registration' ? 'full' : t.status}
-                      </span>
-                      {isHost && (
-                        <span className="absolute top-3 left-3 text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-full border bg-amber-500/10 text-amber-300 border-amber-500/20 backdrop-blur-md">
-                          Host
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Content */}
-                    <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
-                      <div className="space-y-2">
-                        <span className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-widest">{game?.name || 'Multi-platform'}</span>
-                        <h3 className="text-base font-extrabold text-white group-hover:text-cyan-400 transition-colors leading-snug line-clamp-2">{t.title}</h3>
-                        <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">{t.description}</p>
-                      </div>
-
-                      {/* Footer specs */}
-                      <div className="pt-3 border-t border-white/5 flex items-center justify-between text-xs text-zinc-400">
-                        <div className="flex items-center gap-1.5">
-                          <Users className="h-3.5 w-3.5 text-zinc-500" />
-                          <span>{reservedCount}/{t.max_players}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Trophy className="h-3.5 w-3.5 text-cyan-500/80" />
-                          <span className="font-semibold text-zinc-200">{t.prize_pool || '$500 USD'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-slate-500">
+              <span>{filteredTournaments.length} tournament{filteredTournaments.length === 1 ? '' : 's'} found</span>
+              <span>Page {currentPage} of {totalPages}</span>
             </div>
-          
-      
+            {filteredTournaments.length === 0 ? (
+              <div className="rounded-3xl border border-slate-200 bg-white/90 p-6 text-center text-slate-600 shadow-sm">
+                No tournaments match your filters right now. Try clearing the search or selecting a different game.
+              </div>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {paginatedTournaments.map(t => {
+                  const game = games.find(g => g.id === t.game_id);
+                  const count = rosterCounts.find(item => item.tournament_id === t.id);
+                  const approvedCount = count?.approved || 0;
+                  const pendingCount = count?.pending || 0;
+                  const reservedCount = approvedCount + pendingCount;
+                  const isFull = reservedCount >= t.max_players;
+                  const isHost = t.organizer_id === currentUser.id;
+
+                  return (
+                    <div 
+                      key={t.id}
+                      onClick={() => setSelectedTournamentId(t.id)}
+                      className="group flex flex-col h-full rounded-3xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
+                    >
+                      <div className="h-40 overflow-hidden rounded-t-3xl bg-slate-100">
+                        <img 
+                          src={t.banner_url || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800'} 
+                          alt={t.title}
+                          className="w-full h-full object-cover transition duration-500 group-hover:scale-105"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="p-5 flex-1 flex flex-col justify-between gap-4">
+                        <div className="space-y-2">
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-cyan-600">
+                            {game?.name || 'Multi-platform'}
+                          </span>
+                          <h3 className="text-base font-semibold text-slate-950 leading-snug line-clamp-2">{t.title}</h3>
+                          <p className="text-sm text-slate-600 line-clamp-2">{t.description}</p>
+                        </div>
+
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-slate-200 text-sm text-slate-500">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-slate-400" />
+                            <span>{reservedCount}/{t.max_players}</span>
+                          </div>
+                          <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                            <Trophy className="h-3.5 w-3.5 text-cyan-600" />
+                            <span>{t.prize_pool || '$500 USD'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {filteredTournaments.length > itemsPerPage && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white/90 p-3 text-sm text-slate-600 shadow-sm">
+                <span>Showing {paginatedTournaments.length} of {filteredTournaments.length} available tournaments</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={currentPage <= 1}
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       ) : selectedTournamentId === 'new' ? (
         
         // CREATE NEW TOURNAMENT INTERFACE (ORGANIZER ONLY)
@@ -543,7 +672,7 @@ export default function TournamentsView({
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <PlusCircle className="h-5 w-5 text-cyan-400" />
-                Host Custom Tournament Arena
+                Host Custom Tournament
               </h2>
               <p className="text-xs text-gray-400 mt-1">Configure your game titles, bracket sizes, entry fees, and points-only rewards.</p>
             </div>
@@ -564,9 +693,10 @@ export default function TournamentsView({
               const registration_note = hostForm.registration_note.trim();
               const auto_lock_registration = hostForm.auto_lock_registration;
               const points_only = hostForm.points_only;
+              const slot_minutes = Number(hostForm.slot_minutes || 90);
 
               if (!title || !description || !game_id || !start_time) {
-                alert('Please fill out all required fields.');
+                toast.show('Please fill out all required fields.', 'error');
                 return;
               }
 
@@ -585,6 +715,7 @@ export default function TournamentsView({
                   rules,
                   entry_fee,
                   payment_provider,
+                  slot_minutes,
                   registration_note,
                   auto_lock_registration,
                   points_only
@@ -592,7 +723,8 @@ export default function TournamentsView({
                 onRefreshTournaments();
                 setSelectedTournamentId(created.id);
               } catch (err: any) {
-                alert(err.message || 'Host tournament failed');
+                console.error('Host tournament failed:', err);
+                toast.show('Host tournament failed. Please try again.', 'error');
               } finally {
                 setActionLoading(false);
               }
@@ -640,14 +772,20 @@ export default function TournamentsView({
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Bracket Size *</label>
                   <select name="max_players" value={hostForm.max_players} onChange={(e) => setHostForm({ ...hostForm, max_players: e.target.value })} className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50">
-                    <option value="8">8 Players (Single Elimination)</option>
-                    <option value="4">4 Players (Single Elimination)</option>
+                    <option value="4">4 Players</option>
+                    <option value="8">8 Players</option>
+                    <option value="16">16 Players</option>
+                    <option value="32">32 Players</option>
                   </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Tournament Format</label>
                   <select name="format" value={hostForm.format} onChange={(e) => setHostForm({ ...hostForm, format: e.target.value as TournamentFormat })} className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50">
                     <option value="single_elimination">Single Elimination</option>
+                    <option value="double_elimination">Double Elimination</option>
+                    <option value="round_robin">Round Robin</option>
+                    <option value="group_stage">Group Stage</option>
+                    <option value="league">League</option>
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -660,6 +798,10 @@ export default function TournamentsView({
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Entry Fee (USD)</label>
                   <input value={hostForm.entry_fee} onChange={(e) => setHostForm({ ...hostForm, entry_fee: e.target.value })} name="entry_fee" type="number" min="0" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-400">Match Length (minutes)</label>
+                  <input value={hostForm.slot_minutes} onChange={(e) => setHostForm({ ...hostForm, slot_minutes: e.target.value })} name="slot_minutes" type="number" min="15" className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-gray-400">Payment Provider</label>
@@ -687,7 +829,7 @@ export default function TournamentsView({
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-gray-400">Arena Rules & Guidelines</label>
+                <label className="text-xs font-semibold text-gray-400">Tournament Rules & Guidelines</label>
                 <textarea value={hostForm.rules} onChange={(e) => setHostForm({ ...hostForm, rules: e.target.value })} name="rules" rows={3} placeholder="1. Match play duration is 10 min.&#10;2. Submit screenshots of final match scores scorecard within 15 min." className="w-full bg-zinc-900 border border-white/5 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-500/50" />
               </div>
 
@@ -696,7 +838,7 @@ export default function TournamentsView({
                   Cancel
                 </button>
                 <button type="submit" disabled={actionLoading} className="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-black font-semibold rounded-xl text-xs shadow-lg shadow-cyan-500/10 transition-colors cursor-pointer disabled:opacity-50">
-                  {actionLoading ? 'Launching...' : 'Deploy Tournament Arena'}
+                  {actionLoading ? 'Launching...' : 'Deploy Tournament'}
                 </button>
               </div>
 
@@ -715,7 +857,7 @@ export default function TournamentsView({
             className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Back to Arenas
+            Back to Tournaments
           </button>
 
           {/* Banner Hero */}
@@ -739,10 +881,23 @@ export default function TournamentsView({
                     <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight leading-tight">
                       {activeTournament.title}
                     </h1>
+                    {activeTournament.status === 'completed' && activeTournament.winner_id && (
+                      <div className="mt-2 flex items-center gap-3">
+                        <img
+                          src={profiles.find(p => p.id === activeTournament.winner_id)?.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${profiles.find(p => p.id === activeTournament.winner_id)?.username}`}
+                          alt="winner"
+                          className="h-10 w-10 rounded-full object-cover border border-white/10"
+                        />
+                        <div className="text-sm">
+                          <div className="text-xs text-purple-300 font-semibold">Game finished</div>
+                          <div className="text-white font-bold">{getProfileDisplayName(profiles.find(p => p.id === activeTournament.winner_id), 'Winner')}</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Join / Status Button */}
-                  <div>
+                  <div className="space-y-3">
                     {activeTournament.status === 'registration' && (
                       isRegistered ? (
                         <div className="flex items-center gap-1 px-4 py-2 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded-xl text-xs font-bold shadow-[0_0_10px_rgba(6,182,212,0.15)]">
@@ -775,8 +930,49 @@ export default function TournamentsView({
 
                     {activeTournament.status === 'completed' && (
                       <div className="flex items-center gap-1.5 px-4 py-2 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-xl text-xs font-extrabold uppercase tracking-wider">
-                        Concluded Arena
+                        Concluded Tournament
                       </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const link = getSignupLink(activeTournament.id);
+                          navigator.clipboard?.writeText(link);
+                          toast.show('Signup link copied to clipboard', 'success');
+                        }}
+                        className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/10"
+                      >
+                        Copy signup link
+                      </button>
+
+                      {canManageActiveTournament && activeTournament.status === 'registration' && (
+                        <button
+                          type="button"
+                          onClick={handleGenerateSchedule}
+                          disabled={actionLoading}
+                          className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Generate schedule
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setShowEmbedCode((prev) => !prev)}
+                        className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/10"
+                      >
+                        {showEmbedCode ? 'Hide embed code' : 'Embed bracket'}
+                      </button>
+                    </div>
+
+                    {showEmbedCode && (
+                      <textarea
+                        readOnly
+                        value={getEmbedCode(activeTournament.id)}
+                          className="mt-2 w-full min-h-22.5 rounded-2xl border border-white/10 bg-black/80 p-3 text-[11px] text-white"
+                      />
                     )}
                   </div>
                 </div>
@@ -815,7 +1011,7 @@ export default function TournamentsView({
               { id: 'overview', name: 'Rules & Guidelines' },
               { id: 'registrations', name: `Competitors (${registrations.length})` },
               { id: 'bracket', name: 'Tournament Bracket' },
-              { id: 'chat', name: 'Arena Chat' }
+              { id: 'chat', name: 'Tournament Chat' }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -1150,7 +1346,12 @@ export default function TournamentsView({
                   tournamentId={activeTournament.id}
                   profiles={profiles}
                   hostId={activeTournament.organizer_id}
-                  defaultRecipientId={quickDmRecipientId || undefined}
+                  defaultRecipientId={quickDmRecipientId || activeTournament.organizer_id}
+                  allowedRecipientIds={[
+                    activeTournament.organizer_id,
+                    ...registrations.filter((reg) => reg.status === 'approved').map((reg) => reg.player_id)
+                  ]}
+                  simpleMode={true}
                   title="Tournament Chat" 
                 />
               </div>
@@ -1323,6 +1524,35 @@ export default function TournamentsView({
                     </button>
                   ) : null;
                 })()}
+
+                {canManageActiveTournament && selectedMatch.status !== 'completed' && (
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs uppercase tracking-[0.24em] text-cyan-300 font-bold">Match schedule</p>
+                      <span className="text-[11px] text-gray-400">Organizer control</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400">Adjust the scheduled match time and notify participants instantly.</p>
+                    <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-end">
+                      <label className="w-full space-y-1 text-[10px] text-gray-400">
+                        New match time
+                        <input
+                          type="datetime-local"
+                          value={rescheduleTime}
+                          onChange={(e) => setRescheduleTime(e.target.value)}
+                          className="w-full rounded-xl border border-white/10 bg-black/75 px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleRescheduleMatch}
+                        disabled={actionLoading}
+                        className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-black hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {actionLoading ? 'Rescheduling...' : 'Reschedule'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* ACTION FOR PLAYERS: SUBMIT RESULTS FORM */}

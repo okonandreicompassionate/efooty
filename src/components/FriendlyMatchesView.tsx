@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Search, Swords, Plus, CheckCircle2, ArrowRight, Shield, Activity, FileText, UploadCloud, UserPlus, X } from 'lucide-react';
 import { Profile, Game, FriendChallenge } from '../types';
 import { db } from '../services/db';
+import { useToast } from './Toast';
 
 interface FriendlyMatchesViewProps {
   currentUser: Profile;
@@ -13,7 +14,8 @@ interface FriendlyMatchesViewProps {
 
 const MIN_SEARCH_LENGTH = 2;
 
-export default function FriendlyMatchesView({ currentUser, profiles, games, setActiveTab }: FriendlyMatchesViewProps) {
+export default function FriendlyMatchesView({ currentUser, profiles, games, setActiveTab, onRefreshApp }: FriendlyMatchesViewProps) {
+  const toast = useToast();
   const [friendChallenges, setFriendChallenges] = useState<FriendChallenge[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
@@ -118,13 +120,16 @@ export default function FriendlyMatchesView({ currentUser, profiles, games, setA
         challengeTitle.trim() || 'Friendly showdown'
       );
       setChallengeMessage(`Challenge sent to ${selectedOpponent.username}.`);
+      toast.show(`Challenge sent to ${selectedOpponent.username}.`, 'success');
       setSelectedOpponent(null);
       setChallengeTitle('Friendly showdown');
       await loadChallenges();
       onRefreshApp();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create friendly challenge:', err);
-      setChallengeMessage('Unable to send the friendly challenge. Please try again.');
+      const message = 'Unable to send the friendly challenge. Please try again.';
+      setChallengeMessage(message);
+      toast.show(message, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -134,11 +139,14 @@ export default function FriendlyMatchesView({ currentUser, profiles, games, setA
     try {
       await db.acceptFriendChallenge(challengeId, currentUser.id);
       setChallengeMessage('Challenge accepted. Good luck!');
+      toast.show('Challenge accepted. Good luck!', 'success');
       await loadChallenges();
       onRefreshApp();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to accept friendly challenge:', err);
-      setChallengeMessage('Could not accept the challenge at this time.');
+      const message = 'Could not accept the challenge at this time.';
+      setChallengeMessage(message);
+      toast.show(message, 'error');
     }
   };
 
@@ -222,9 +230,9 @@ export default function FriendlyMatchesView({ currentUser, profiles, games, setA
       <div className="rounded-[32px] border border-white/10 bg-zinc-950/70 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-cyan-400">Friendly Arena</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-cyan-400">Friendly matches</p>
             <h1 className="text-3xl font-black tracking-tight text-white">Friendly match search & challenge flow</h1>
-            <p className="max-w-2xl text-sm text-zinc-400 mt-2">Search KickOff players in the database, pick an opponent, and manage friendly matches on a dedicated page.</p>
+            <p className="max-w-2xl text-sm text-zinc-400 mt-2">Search eTournament players in the database, pick an opponent, and manage friendly matches on a dedicated page.</p>
           </div>
           <button
             onClick={() => setActiveTab('dashboard')}
@@ -242,7 +250,7 @@ export default function FriendlyMatchesView({ currentUser, profiles, games, setA
             <div className="flex items-center justify-between gap-3 mb-5">
               <div>
                 <h2 className="text-lg font-bold text-white">Challenge a player</h2>
-                <p className="text-xs text-zinc-500">Only players registered in the KickOff database can be challenged.</p>
+                <p className="text-xs text-zinc-500">Only players registered in the eTournament database can be challenged.</p>
               </div>
               <div className="rounded-full bg-cyan-500/10 p-2 text-cyan-300">
                 <Swords className="h-4 w-4" />
@@ -491,7 +499,7 @@ export default function FriendlyMatchesView({ currentUser, profiles, games, setA
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="flex items-center gap-2 text-sm text-zinc-400">
                   <Shield className="h-4 w-4 text-cyan-300" />
-                  <span>All opponents are verified KickOff profiles.</span>
+                  <span>All opponents are verified eTournament profiles.</span>
                 </div>
                 <p className="mt-3 text-xs text-zinc-500">This flow prevents free-text invites and keeps friendly games tied to database accounts.</p>
               </div>
@@ -514,7 +522,7 @@ export default function FriendlyMatchesView({ currentUser, profiles, games, setA
 
           <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-5 shadow-[0_20px_70px_rgba(0,0,0,0.35)]">
             <h2 className="text-lg font-bold text-white">Need more opponents?</h2>
-            <p className="mt-2 text-sm text-zinc-400">Use the player search above or visit the Friends page to build your KickOff roster. Every match starts from a verified database profile.</p>
+            <p className="mt-2 text-sm text-zinc-400">Use the player search above or visit the Friends page to build your eTournament roster. Every match starts from a verified database profile.</p>
           </div>
         </div>
       </div>

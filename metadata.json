@@ -1,6 +1,6 @@
 {
-  "name": "KickOff",
-  "description": "A premium, fully functional esports tournament platform featuring tournaments, matchmaking brackets, player profiles, organizer dashboards, leaderboards, achievements, and Supabase integration.",
+  "name": "eTournament",
+  "description": "A bright, production-ready esports tournament platform featuring tournaments, matchmaking brackets, player profiles, organizer dashboards, leaderboards, achievements, and Supabase integration.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

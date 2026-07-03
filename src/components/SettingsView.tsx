@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Settings, User, Bell, Shield, Save, CheckCircle } from 'lucide-react';
 import { Profile, Settings as UserSettings } from '../types';
 import { db } from '../services/db';
+import { useToast } from './Toast';
 
 interface SettingsViewProps {
   currentUser: Profile;
@@ -9,6 +10,7 @@ interface SettingsViewProps {
 }
 
 export default function SettingsView({ currentUser, onRefreshProfile }: SettingsViewProps) {
+  const toast = useToast();
   // Profile settings
   const [bio, setBio] = useState(currentUser.bio || '');
   const [username, setUsername] = useState(currentUser.username);
@@ -37,6 +39,7 @@ export default function SettingsView({ currentUser, onRefreshProfile }: Settings
         setAnonymousMode(Boolean(setts.anonymous_mode));
       } catch (err) {
         console.error('Error fetching settings:', err);
+        toast.show('Failed to load settings.', 'error');
       }
     }
     fetchSettings();
@@ -50,7 +53,7 @@ export default function SettingsView({ currentUser, onRefreshProfile }: Settings
       // Save profile update
       const normalizedUsername = username.trim().replace(/\s+/g, '_').toLowerCase();
       if (normalizedUsername.length < 3) {
-        alert('Username must be at least 3 characters.');
+        toast.show('Username must be at least 3 characters.', 'error');
         return;
       }
 
@@ -73,7 +76,8 @@ export default function SettingsView({ currentUser, onRefreshProfile }: Settings
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
-      alert(err.message || 'Saving failed');
+      console.error('Saving settings failed:', err);
+      toast.show('Saving failed. Please try again.', 'error');
     } finally {
       setSaving(false);
     }

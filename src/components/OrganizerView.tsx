@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Tournament, Profile, TournamentPlayer, Match } from '../types';
 import { db } from '../services/db';
+import { useToast } from './Toast';
 
 interface OrganizerViewProps {
   currentUser: Profile;
@@ -25,6 +26,7 @@ export default function OrganizerView({
 }: OrganizerViewProps) {
   const [pendingRegs, setPendingRegs] = useState<(TournamentPlayer & { tournamentTitle: string })[]>([]);
   const [disputedMatches, setDisputedMatches] = useState<(Match & { tournamentTitle: string })[]>([]);
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -54,8 +56,9 @@ export default function OrganizerView({
         setPendingRegs(regsResult.flat());
         setDisputedMatches(matchesResult.flat());
       } catch (err) {
-        console.error('Error fetching hub details:', err);
-      } finally {
+          console.error('Error fetching hub details:', err);
+          toast.show('Failed to load organizer hub data.', 'error');
+        } finally {
         setLoading(false);
       }
     }
@@ -68,7 +71,8 @@ export default function OrganizerView({
       await db.approvePlayer(regId, status);
       onRefreshTournaments();
     } catch (err: any) {
-      alert(err.message || 'Action failed');
+      console.error('Organizer action failed:', err);
+      toast.show('Action failed. Please try again.', 'error');
     }
   };
 
@@ -79,9 +83,10 @@ export default function OrganizerView({
     if (!message?.trim()) return;
     try {
       await db.sendTournamentNotice(tournamentId, playerId, 'Tournament update', message.trim());
-      alert('Notice sent to the player.');
+      toast.show('Notice sent to the player.', 'success');
     } catch (err: any) {
-      alert(err.message || 'Could not send notice.');
+      console.error('Could not send notice:', err);
+      toast.show('Could not send notice. Please try again.', 'error');
     }
   };
 

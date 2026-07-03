@@ -21,7 +21,8 @@ export default function DashboardView({
   tournaments, 
   games, 
   setActiveTab,
-  setSelectedTournamentId
+  setSelectedTournamentId,
+  onRefreshApp
 }: DashboardViewProps) {
   const [stats, setStats] = useState<PlayerStatistics[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -154,7 +155,7 @@ export default function DashboardView({
         {/* Metric 1 */}
         <div className="rounded-2xl border border-white/5 bg-zinc-950/40 p-5 hover:border-white/10 transition-all">
           <div className="flex justify-between items-start">
-            <span className="text-xs font-semibold text-zinc-400">Active Arenas</span>
+            <span className="text-xs font-semibold text-zinc-400">Active Tournaments</span>
             <span className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400">
               <Gamepad2 className="h-4 w-4" />
             </span>
@@ -256,7 +257,7 @@ export default function DashboardView({
             <div className="grid gap-3 md:grid-cols-[1.2fr_auto]">
               <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-zinc-300">
                 <p className="font-semibold text-white">Search by username or email</p>
-                <p className="mt-2 text-xs text-zinc-500">Friendly matches are now tied to real KickOff users from the database. No more free-text opponent names.</p>
+                <p className="mt-2 text-xs text-zinc-500">Friendly matches are now tied to real eTournament users from the database. No more free-text opponent names.</p>
               </div>
               <button
                 type="button"
@@ -483,11 +484,11 @@ export default function DashboardView({
 
       </div>
 
-      {/* Global Arena Lounge Chat */}
+      {/* Global Tournament Lounge Chat */}
       <div className="mt-8">
         <div className="flex items-center gap-2 mb-4">
           <MessageSquare className="h-5 w-5 text-cyan-400" />
-          <h2 className="text-lg font-bold text-white">Global Arena Lounge</h2>
+          <h2 className="text-lg font-bold text-white">Global Tournament Lounge</h2>
         </div>
         <ChatBox currentUser={currentUser} tournamentId="global" title="Global Chat Lobby" />
       </div>

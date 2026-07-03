@@ -15,10 +15,13 @@ interface BracketTreeProps {
 }
 
 export default function BracketTree({ matches, profiles, currentUser, onMatchSelect }: BracketTreeProps) {
-  // Group matches by round
-  const round1 = matches.filter(m => m.round_no === 1).sort((a, b) => a.match_no - b.match_no);
-  const round2 = matches.filter(m => m.round_no === 2).sort((a, b) => a.match_no - b.match_no);
-  const round3 = matches.filter(m => m.round_no === 3).sort((a, b) => a.match_no - b.match_no);
+  const roundNumbers = Array.from(new Set(matches.map((m) => m.round_no))).sort((a, b) => a - b);
+  const matchesByRound: Record<number, Match[]> = roundNumbers.reduce((acc, round) => {
+    acc[round] = matches
+      .filter((m) => m.round_no === round)
+      .sort((a, b) => a.match_no - b.match_no);
+    return acc;
+  }, {} as Record<number, Match[]>);
 
   const getPlayerName = (id?: string) => {
     if (!id) return 'TBD';
@@ -148,52 +151,52 @@ export default function BracketTree({ matches, profiles, currentUser, onMatchSel
     );
   };
 
+  if (roundNumbers.length === 0) {
+    return (
+      <div className="w-full rounded-3xl border border-white/10 bg-zinc-950/70 p-8 text-center text-sm text-zinc-400">
+        No bracket matches are available yet. Generate the bracket or approve players to start.
+      </div>
+    );
+  }
+
+  const maxRound = Math.max(...roundNumbers);
   return (
     <div className="w-full overflow-x-auto pb-6">
-      <div className="min-w-[750px] grid grid-cols-3 gap-8 relative py-4">
-        
-        {/* Quarterfinals Round */}
-        <div className="space-y-8 flex flex-col justify-center">
-          <div className="text-center mb-2">
-            <h4 className="text-xs font-extrabold uppercase tracking-widest text-zinc-400">Quarterfinals</h4>
-            <span className="text-[10px] text-zinc-600">{round1.length} Matches</span>
-          </div>
-          {round1.length === 0 ? (
-            <div className="text-center py-6 text-xs text-zinc-500 border border-dashed border-white/10 rounded-xl">Pending approved players</div>
-          ) : (
-            round1.map(m => renderMatchCard(m))
-          )}
-        </div>
+      <div
+        className="grid gap-8 relative py-4"
+        style={{
+          minWidth: Math.max(750, roundNumbers.length * 280),
+          gridTemplateColumns: `repeat(${roundNumbers.length}, minmax(0, 1fr))`
+        }}
+      >
+        {roundNumbers.map((round) => {
+          const roundMatches = matchesByRound[round] || [];
+          const heading = round === maxRound
+            ? 'Grand Finals'
+            : round === maxRound - 1
+              ? 'Semifinals'
+              : round === maxRound - 2
+                ? 'Quarterfinals'
+                : `Round ${round}`;
 
-        {/* Semifinals Round */}
-        <div className="space-y-16 flex flex-col justify-center">
-          <div className="text-center mb-2">
-            <h4 className="text-xs font-extrabold uppercase tracking-widest text-zinc-400">Semifinals</h4>
-            <span className="text-[10px] text-zinc-600">{round2.length} Matches</span>
-          </div>
-          {round2.length === 0 ? (
-            <div className="text-center py-6 text-xs text-zinc-500 border border-dashed border-white/10 rounded-xl">Waiting for Quarterfinals</div>
-          ) : (
-            round2.map(m => renderMatchCard(m))
-          )}
-        </div>
-
-        {/* Finals Round */}
-        <div className="space-y-32 flex flex-col justify-center">
-          <div className="text-center mb-2">
-            <h4 className="text-xs font-extrabold uppercase tracking-widest text-cyan-400 flex items-center justify-center gap-1">
-              <Award className="h-3.5 w-3.5" />
-              Championship
-            </h4>
-            <span className="text-[10px] text-zinc-600">Grand Finals</span>
-          </div>
-          {round3.length === 0 ? (
-            <div className="text-center py-6 text-xs text-zinc-500 border border-dashed border-white/10 rounded-xl">Waiting for Semifinals</div>
-          ) : (
-            round3.map(m => renderMatchCard(m))
-          )}
-        </div>
-
+          return (
+            <div key={round} className="space-y-8 flex flex-col justify-center">
+              <div className="text-center mb-2">
+                <h4 className={`text-xs font-extrabold uppercase tracking-widest ${round === maxRound ? 'text-cyan-400' : 'text-zinc-400'}`}>
+                  {heading}
+                </h4>
+                <span className="text-[10px] text-zinc-600">{roundMatches.length} Matches</span>
+              </div>
+              {roundMatches.length === 0 ? (
+                <div className="text-center py-6 text-xs text-zinc-500 border border-dashed border-white/10 rounded-xl">
+                  {round === 1 ? 'Pending approved players' : `Waiting for Round ${round - 1}`}
+                </div>
+              ) : (
+                roundMatches.map(m => renderMatchCard(m))
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

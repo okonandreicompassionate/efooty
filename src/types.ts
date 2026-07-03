@@ -24,7 +24,7 @@ export interface Game {
 }
 
 export type TournamentStatus = 'draft' | 'registration' | 'active' | 'completed';
-export type TournamentFormat = 'single_elimination' | 'double_elimination' | 'round_robin';
+export type TournamentFormat = 'single_elimination' | 'double_elimination' | 'round_robin' | 'group_stage' | 'league';
 
 export interface Tournament {
   id: string;
@@ -45,6 +45,7 @@ export interface Tournament {
   registration_note?: string;
   auto_lock_registration?: boolean;
   points_only?: boolean;
+  slot_minutes?: number;
   created_at: string;
   updated_at: string;
 }
@@ -191,6 +192,7 @@ export interface Settings {
   dark_mode: boolean;
   show_email?: boolean;
   allow_dms?: boolean;
+  anonymous_mode?: boolean;
 }
 
 export interface ChatMessage {

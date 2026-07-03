@@ -23,7 +23,7 @@ import {
 } from '../types';
 
 const assertSupabase = () => {
-  if (!isSupabaseConfigured || !supabase) {
+  if (!isSupabaseConfigured) {
     throw new Error('Supabase is not configured. Live mode requires a connected Supabase database.');
   }
 };
@@ -89,7 +89,7 @@ const DEFAULT_GAMES: Omit<Game, 'created_at' | 'id'>[] = [
 
 const DEFAULT_ACHIEVEMENTS: Omit<Achievement, 'id'>[] = [
   { name: 'First Victory', description: 'Win your first tournament match', badge_icon: 'Award', xp_reward: 100 },
-  { name: 'Champion Ascent', description: 'Win a KickOff grand championship tournament', badge_icon: 'Trophy', xp_reward: 500 }
+  { name: 'Champion Ascent', description: 'Win an eTournament grand championship tournament', badge_icon: 'Trophy', xp_reward: 500 }
 ];
 
 const ensureProfileAndSettings = async (userId: string, authUser: any) => {
@@ -113,10 +113,10 @@ const ensureProfileAndSettings = async (userId: string, authUser: any) => {
     const { error: insertProfileError } = await supabase.from('profiles').insert({
       id: userId,
       username,
-      email: authUser?.email || `${username}@kickoff.local`,
+      email: authUser?.email || `${username}@etournament.local`,
       avatar_url: authUser?.user_metadata?.avatar_url || null,
       role,
-      bio: 'Joined through KickOff live mode.'
+      bio: 'Joined through eTournament live mode.'
     });
 
     if (insertProfileError) {
@@ -256,6 +256,160 @@ const generateUuid = () =>
     const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
+
+const buildSingleEliminationMatches = (playerIds: string[], tournamentId: string, start: string, slotMinutes: number): any[] => {
+  const now = new Date().toISOString();
+  const rounds = Math.ceil(Math.log2(playerIds.length));
+  const roundIds: string[][] = [];
+  for (let round = 1; round <= rounds; round++) {
+    roundIds[round] = Array.from({ length: 2 ** (rounds - round) }, () => generateUuid());
+  }
+
+  const matches: any[] = [];
+  let cursor = new Date(start).getTime();
+  let matchNo = 1;
+
+  for (let round = 1; round <= rounds; round++) {
+    const totalMatches = roundIds[round].length;
+    for (let index = 0; index < totalMatches; index++) {
+      const player1_id = round === 1 ? playerIds[index * 2] || null : null;
+      const player2_id = round === 1 ? playerIds[index * 2 + 1] || null : null;
+      const next_match_id = round < rounds ? roundIds[round + 1][Math.floor(index / 2)] : null;
+      const status = round === 1 && player1_id && player2_id ? 'playing' : 'waiting';
+
+      matches.push({
+        id: roundIds[round][index],
+        tournament_id: tournamentId,
+        player1_id,
+        player2_id,
+        player1_score: 0,
+        player2_score: 0,
+        winner_id: null,
+        status,
+        round_no: round,
+        match_no: matchNo++,
+        next_match_id,
+        scheduled_time: new Date(cursor).toISOString(),
+        created_at: now,
+        updated_at: now
+      });
+      cursor += slotMinutes * 60 * 1000;
+    }
+  }
+
+  return matches;
+};
+
+const buildRoundRobinMatches = (playerIds: string[], tournamentId: string, start: string, slotMinutes: number, groupIndex = 0): any[] => {
+  const players = [...playerIds];
+  if (players.length % 2 === 1) {
+    players.push(null as any);
+  }
+
+  const rounds = players.length - 1;
+  const half = players.length / 2;
+  const matches: any[] = [];
+  let cursor = new Date(start).getTime();
+  let matchNo = 1;
+  const now = new Date().toISOString();
+  const schedulePlayers = [...players];
+
+  for (let round = 1; round <= rounds; round++) {
+    for (let index = 0; index < half; index++) {
+      const player1_id = schedulePlayers[index];
+      const player2_id = schedulePlayers[players.length - 1 - index];
+      if (!player1_id || !player2_id) {
+        continue;
+      }
+
+      matches.push({
+        id: generateUuid(),
+        tournament_id: tournamentId,
+        player1_id,
+        player2_id,
+        player1_score: 0,
+        player2_score: 0,
+        winner_id: null,
+        status: 'waiting',
+        round_no: groupIndex > 0 ? groupIndex : round,
+        match_no: matchNo++,
+        next_match_id: null,
+        scheduled_time: new Date(cursor).toISOString(),
+        created_at: now,
+        updated_at: now
+      });
+      cursor += slotMinutes * 60 * 1000;
+    }
+
+    const first = schedulePlayers.splice(1, 1)[0];
+    schedulePlayers.push(first);
+  }
+
+  return matches;
+};
+
+const buildGroupStageMatches = (playerIds: string[], tournamentId: string, start: string, slotMinutes: number): any[] => {
+  const groupCount = Math.min(4, Math.max(1, Math.floor(playerIds.length / 4)));
+  const groups: string[][] = Array.from({ length: groupCount }, () => []);
+  playerIds.forEach((id, index) => {
+    groups[index % groupCount].push(id);
+  });
+
+  const matches: any[] = [];
+  let cursor = new Date(start).getTime();
+  const now = new Date().toISOString();
+  let groupRound = 1;
+
+  groups.forEach((groupPlayers) => {
+    if (groupPlayers.length < 2) return;
+    const players = [...groupPlayers];
+    if (players.length % 2 === 1) players.push(null as any);
+    const rounds = players.length - 1;
+    const half = players.length / 2;
+    const schedulePlayers = [...players];
+    let matchNo = 1;
+
+    for (let round = 1; round <= rounds; round++) {
+      for (let index = 0; index < half; index++) {
+        const player1_id = schedulePlayers[index];
+        const player2_id = schedulePlayers[players.length - 1 - index];
+        if (!player1_id || !player2_id) continue;
+
+        matches.push({
+          id: generateUuid(),
+          tournament_id: tournamentId,
+          player1_id,
+          player2_id,
+          player1_score: 0,
+          player2_score: 0,
+          winner_id: null,
+          status: 'waiting',
+          round_no: groupRound,
+          match_no: matchNo++,
+          next_match_id: null,
+          scheduled_time: new Date(cursor).toISOString(),
+          created_at: now,
+          updated_at: now
+        });
+        cursor += slotMinutes * 60 * 1000;
+      }
+
+      const first = schedulePlayers.splice(1, 1)[0];
+      schedulePlayers.push(first);
+    }
+
+    groupRound += 1;
+  });
+
+  return matches;
+};
+
+const buildDoubleEliminationMatches = (playerIds: string[], tournamentId: string, start: string, slotMinutes: number): any[] => {
+  // For now, generate a single-elimination winner bracket as the base structure.
+  // This preserves match generation and allows the double elimination tournament
+  // format to show a bracket while more advanced loser-bracket logic is added.
+  return buildSingleEliminationMatches(playerIds, tournamentId, start, slotMinutes);
+};
 
 const normalizeUsername = (username: string) => username.trim().replace(/\s+/g, '_').toLowerCase();
 
@@ -423,7 +577,7 @@ export const db = {
       .update({ role, updated_at: new Date().toISOString() })
       .eq('id', user.id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       throw error || new Error('Failed to update user role.');
@@ -460,7 +614,7 @@ export const db = {
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error || !data) throw error || new Error('Failed to update user profile.');
 
@@ -603,6 +757,7 @@ export const db = {
       payment_provider: tournament.payment_provider || 'none',
       auto_lock_registration: tournament.auto_lock_registration ?? true,
       points_only: tournament.points_only ?? false,
+      slot_minutes: tournament.slot_minutes || 90,
       status: tournament.status || 'registration',
       format: tournament.format || 'single_elimination'
     };
@@ -611,7 +766,7 @@ export const db = {
       .from('tournaments')
       .insert([tournamentToInsert])
       .select()
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       console.error('[db.createTournament] Failed to create tournament in Supabase:', error);
@@ -772,7 +927,7 @@ export const db = {
       throw new Error('This tournament is full.');
     }
 
-    const { data, error } = await supabase
+    const { data: insertedRegistration, error: insertError } = await supabase
       .from('tournament_players')
       .insert([{
         tournament_id: tournamentId,
@@ -788,68 +943,60 @@ export const db = {
         payment_reference: registrationData.payment_reference || null
       }])
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error || !data) throw error || new Error('Failed to register player');
+    if (insertError || !insertedRegistration) {
+      throw insertError || new Error('Failed to register for tournament.');
+    }
 
-    await supabase.from('activity_logs').insert({
-      user_id: playerId,
-      action_type: 'TOURNAMENT_REGISTER',
-      description: 'Registered for tournament'
-    });
-
-    if (defaultStatus === 'approved') await maybeGenerateBracketWhenFull(tournamentId);
-
-    return data as TournamentPlayer;
+    return insertedRegistration as TournamentPlayer;
   },
 
   approvePlayer: async (registrationId: string, status: PlayerRegistrationStatus): Promise<TournamentPlayer> => {
     assertSupabase();
 
+    if (status !== 'approved' && status !== 'rejected') {
+      throw new Error('Invalid registration status update.');
+    }
+
     const { data: existingReg, error: existingRegError } = await supabase
       .from('tournament_players')
-      .select('tournament_id')
+      .select('*')
       .eq('id', registrationId)
       .maybeSingle();
 
     if (existingRegError || !existingReg) throw existingRegError || new Error('Registration not found.');
 
-    if (status === 'approved') {
-      const tournament = await db.getTournament(existingReg.tournament_id);
-      if (!tournament) throw new Error('Tournament not found.');
+    const tournament = await db.getTournament(existingReg.tournament_id);
+    if (!tournament) throw new Error('Tournament not found.');
 
+    if (status === 'approved') {
       const approvedCount = await getApprovedTournamentSlotCount(existingReg.tournament_id, registrationId);
       if (approvedCount >= tournament.max_players) {
         throw new Error('This approval would exceed the tournament player limit.');
       }
     }
 
-    const { data: reg, error } = await supabase
+    const { data: updatedReg, error: updateError } = await supabase
       .from('tournament_players')
       .update({ status, updated_at: new Date().toISOString() })
       .eq('id', registrationId)
       .select()
-      .single();
-
-    if (error || !reg) throw error || new Error('Failed to update registration');
-
-    const { data: tournament } = await supabase
-      .from('tournaments')
-      .select('title, max_players')
-      .eq('id', reg.tournament_id)
       .maybeSingle();
 
+    if (updateError || !updatedReg) throw updateError || new Error('Failed to update registration');
+
     await supabase.from('notifications').insert({
-      user_id: reg.player_id,
+      user_id: updatedReg.player_id,
       title: status === 'approved' ? 'Registration Approved!' : 'Registration Update',
-      content: `Your slot in "${tournament?.title || 'tournament'}" has been ${status}.`,
-      link: `/tournaments/${reg.tournament_id}`,
+      content: `Your slot in "${tournament.title}" has been ${status}.`,
+      link: `/tournaments/${updatedReg.tournament_id}`,
       is_read: false
     });
 
-    if (status === 'approved') await maybeGenerateBracketWhenFull(reg.tournament_id);
+    if (status === 'approved') await maybeGenerateBracketWhenFull(updatedReg.tournament_id);
 
-    return reg as TournamentPlayer;
+    return updatedReg as TournamentPlayer;
   },
 
   submitPaymentReference: async (registrationId: string, paymentReference: string): Promise<TournamentPlayer> => {
@@ -865,7 +1012,7 @@ export const db = {
       })
       .eq('id', registrationId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error || !reg) throw error || new Error('Failed to submit payment reference.');
 
@@ -925,7 +1072,7 @@ export const db = {
       })
       .eq('id', registrationId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error || !reg) throw error || new Error('Failed to confirm payment');
 
@@ -1078,7 +1225,7 @@ export const db = {
 
     const playerIds = (approvedPlayers || [])
       .map((p: any) => p.player_id)
-      .filter((playerId: string | undefined) => Boolean(playerId) && playerId !== tournament.organizer_id);
+      .filter((playerId: string | undefined) => Boolean(playerId) && playerId !== tournament.organizer_id) as string[];
 
     if (playerIds.length < 2) {
       throw new Error('At least 2 approved players are required to generate a bracket.');
@@ -1086,58 +1233,19 @@ export const db = {
     if (playerIds.length > tournament.max_players) {
       throw new Error('Approved players exceed the tournament limit.');
     }
-    const now = new Date().toISOString();
-    const matchesToInsert: any[] = [];
 
-    const getScheduledTime = (roundNo: number, matchNo: number) => {
-      const base = new Date(tournament.start_time);
-      const offsetMs = ((roundNo - 1) * 24 + (matchNo - 1) * 3) * 60 * 60 * 1000;
-      return new Date(base.getTime() + offsetMs).toISOString();
-    };
+    const slotMinutes = tournament.slot_minutes || 90;
+    const startTime = tournament.start_time || new Date().toISOString();
+    let matchesToInsert: any[] = [];
 
-    const addMatch = (partial: any) => {
-      matchesToInsert.push({
-        id: generateUuid(),
-        tournament_id: tournamentId,
-        player1_id: partial.player1_id || null,
-        player2_id: partial.player2_id || null,
-        player1_score: 0,
-        player2_score: 0,
-        winner_id: null,
-        status: partial.status || 'waiting',
-        round_no: partial.round_no,
-        match_no: partial.match_no,
-        next_match_id: partial.next_match_id || null,
-        scheduled_time: partial.scheduled_time || getScheduledTime(partial.round_no, partial.match_no),
-        created_at: now,
-        updated_at: now
-      });
-    };
-
-    if (playerIds.length <= 2) {
-      addMatch({ round_no: 1, match_no: 1, player1_id: playerIds[0], player2_id: playerIds[1] || null, status: playerIds.length === 2 ? 'playing' : 'waiting' });
-    } else if (playerIds.length <= 4) {
-      const finalId = generateUuid();
-      addMatch({ round_no: 2, match_no: 1, next_match_id: null });
-      const semi1 = generateUuid();
-      const semi2 = generateUuid();
-      matchesToInsert[0].id = finalId;
-      addMatch({ round_no: 1, match_no: 1, player1_id: playerIds[0], player2_id: playerIds[3] || null, next_match_id: finalId, status: 'playing' });
-      addMatch({ round_no: 1, match_no: 2, player1_id: playerIds[1], player2_id: playerIds[2] || null, next_match_id: finalId, status: 'playing' });
+    if (tournament.format === 'round_robin' || tournament.format === 'league') {
+      matchesToInsert = buildRoundRobinMatches(playerIds, tournamentId, startTime, slotMinutes, tournament.format === 'league' ? 0 : 0);
+    } else if (tournament.format === 'group_stage') {
+      matchesToInsert = buildGroupStageMatches(playerIds, tournamentId, startTime, slotMinutes);
+    } else if (tournament.format === 'double_elimination') {
+      matchesToInsert = buildDoubleEliminationMatches(playerIds, tournamentId, startTime, slotMinutes);
     } else {
-      const finalId = generateUuid();
-      const semi1Id = generateUuid();
-      const semi2Id = generateUuid();
-      addMatch({ round_no: 3, match_no: 1, next_match_id: null });
-      addMatch({ round_no: 2, match_no: 1, next_match_id: finalId });
-      addMatch({ round_no: 2, match_no: 2, next_match_id: finalId });
-      addMatch({ round_no: 1, match_no: 1, player1_id: playerIds[0], player2_id: playerIds[7] || null, next_match_id: semi1Id, status: 'playing' });
-      addMatch({ round_no: 1, match_no: 2, player1_id: playerIds[3], player2_id: playerIds[4] || null, next_match_id: semi1Id, status: 'playing' });
-      addMatch({ round_no: 1, match_no: 3, player1_id: playerIds[1], player2_id: playerIds[6] || null, next_match_id: semi2Id, status: 'playing' });
-      addMatch({ round_no: 1, match_no: 4, player1_id: playerIds[2], player2_id: playerIds[5] || null, next_match_id: semi2Id, status: 'playing' });
-      matchesToInsert[0].id = finalId;
-      matchesToInsert[1].id = semi1Id;
-      matchesToInsert[2].id = semi2Id;
+      matchesToInsert = buildSingleEliminationMatches(playerIds, tournamentId, startTime, slotMinutes);
     }
 
     const { data: insertedMatches, error: insertError } = await supabase
@@ -1363,6 +1471,103 @@ export const db = {
     return match as Match;
   },
 
+  rescheduleMatch: async (matchId: string, newScheduledTime: string | null): Promise<Match> => {
+    assertSupabase();
+    if (!isUuid(matchId)) throw new Error('Invalid match id.');
+
+    const { data: match, error: matchError } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('id', matchId)
+      .maybeSingle();
+    if (matchError || !match) throw matchError || new Error('Match not found.');
+
+    const { data: updated, error: updateError } = await supabase
+      .from('matches')
+      .update({ scheduled_time: newScheduledTime, updated_at: new Date().toISOString() })
+      .eq('id', matchId)
+      .select()
+      .maybeSingle();
+
+    if (updateError || !updated) throw updateError || new Error('Failed to reschedule match.');
+
+    if (match.next_match_id) {
+      const { data: nextMatch } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('id', match.next_match_id)
+        .maybeSingle();
+
+      if (nextMatch) {
+        const thisTime = newScheduledTime ? new Date(newScheduledTime).getTime() : null;
+        const nextTime = nextMatch.scheduled_time ? new Date(nextMatch.scheduled_time).getTime() : null;
+        if (thisTime && (!nextTime || nextTime <= thisTime)) {
+          const shiftedTime = new Date(thisTime + 2 * 60 * 60 * 1000).toISOString();
+          await supabase
+            .from('matches')
+            .update({ scheduled_time: shiftedTime, updated_at: new Date().toISOString() })
+            .eq('id', nextMatch.id);
+        }
+      }
+    }
+
+    const participantIds = [match.player1_id, match.player2_id].filter(Boolean) as string[];
+    if (participantIds.length) {
+      const notifications = participantIds.map((uid) => ({
+        user_id: uid,
+        title: 'Match rescheduled',
+        content: `A match you are in was rescheduled to ${newScheduledTime ? new Date(newScheduledTime).toLocaleString() : 'TBD'}.`,
+        link: `/tournaments/${match.tournament_id}`,
+        is_read: false
+      }));
+      await supabase.from('notifications').insert(notifications);
+    }
+
+    return updated as Match;
+  },
+
+  generateSchedule: async (tournamentId: string, opts: { start_time?: string; slot_minutes?: number } = {}): Promise<Match[]> => {
+    assertSupabase();
+    if (!isUuid(tournamentId)) throw new Error('Invalid tournament id.');
+
+    const { data: tournament, error: tError } = await supabase
+      .from('tournaments')
+      .select('start_time')
+      .eq('id', tournamentId)
+      .maybeSingle();
+    if (tError) throw tError;
+
+    const start = opts.start_time || tournament?.start_time || new Date().toISOString();
+    const slotMinutes = opts.slot_minutes || 120;
+
+    const { data: matches, error: mErr } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('tournament_id', tournamentId)
+      .order('round_no', { ascending: true })
+      .order('match_no', { ascending: true });
+    if (mErr) throw mErr;
+
+    let cursor = new Date(start).getTime();
+    const updatedMatches: Match[] = [];
+
+    for (const match of (matches || []) as Match[]) {
+      if (!match.scheduled_time) {
+        const scheduled = new Date(cursor).toISOString();
+        const { data: updated } = await supabase
+          .from('matches')
+          .update({ scheduled_time: scheduled, updated_at: new Date().toISOString() })
+          .eq('id', match.id)
+          .select()
+          .maybeSingle();
+        if (updated) updatedMatches.push(updated as Match);
+        cursor += slotMinutes * 60 * 1000;
+      }
+    }
+
+    return updatedMatches;
+  },
+
   createFriendChallenge: async (hostId: string, opponentId: string, opponentName: string, gameId: string, title: string): Promise<FriendChallenge> => {
     assertSupabase();
     if (!isUuid(hostId)) throw new Error('Host id must be a valid UUID.');
@@ -1373,7 +1578,7 @@ export const db = {
       .from('friend_challenges')
       .insert([{ host_id: hostId, opponent_id: opponentId, opponent_name: opponentName, game_id: gameId, title: title || 'Friendly challenge', status: 'pending', integrity_status: 'pending' }])
       .select()
-      .single();
+      .maybeSingle();
 
     if (error || !data) throw error || new Error('Failed to create friend challenge.');
 
@@ -1399,12 +1604,27 @@ export const db = {
 
   acceptFriendChallenge: async (challengeId: string, opponentId: string): Promise<FriendChallenge> => {
     assertSupabase();
+    // verify active session and that the requestor matches the authenticated user
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      console.error('[db.acceptFriendChallenge] supabase.auth.getSession failed:', sessionError);
+    }
+    const sessionUserId = session?.user?.id;
+    const accessTokenExists = !!session?.access_token;
+    if (!accessTokenExists || !sessionUserId) {
+      throw new Error('Your authentication session is missing or expired. Please sign in again and try accepting the challenge.');
+    }
+    if (sessionUserId !== opponentId) {
+      console.error('[db.acceptFriendChallenge] Session user mismatch', { sessionUserId, opponentId });
+      throw new Error('You are not authorized to accept this challenge. Please sign in with the correct account.');
+    }
+
     const { data, error } = await supabase
       .from('friend_challenges')
       .update({ status: 'accepted', opponent_id: opponentId, updated_at: new Date().toISOString() })
       .eq('id', challengeId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error || !data) throw error || new Error('Failed to accept friend challenge');
 
@@ -1456,7 +1676,7 @@ export const db = {
       .update(updates)
       .eq('id', challengeId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (updateError || !updatedChallenge) throw updateError || new Error('Failed to update challenge result');
     return updatedChallenge as FriendChallenge;
@@ -1508,6 +1728,22 @@ export const db = {
 
     // Use the authenticated Supabase user as one side of the friendship to satisfy RLS
     const authUser = await getSupabaseAuthUser();
+    // Ensure there is an active session/access token so RLS can validate auth.uid()
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      console.error('[db.sendFriendRequest] supabase.auth.getSession failed:', sessionError);
+    }
+
+    const sessionUserId = session?.user?.id;
+    const accessTokenExists = !!session?.access_token;
+    if (!accessTokenExists || !sessionUserId) {
+      throw new Error('Your authentication session is missing or expired. Please sign in again and try adding the friend.');
+    }
+
+    if (sessionUserId !== authUser.id) {
+      console.error('[db.sendFriendRequest] Supabase session user does not match authenticated user', { sessionUserId, authUserId: authUser.id });
+      throw new Error('Authentication mismatch detected. Please sign in again.');
+    }
     if (!authUser?.id) throw new Error('No authenticated user available for sending friend request. Please sign in.');
 
     const userA = authUser.id;
@@ -1539,7 +1775,7 @@ export const db = {
         .from('friendships')
         .insert([{ requester_id: requesterA, addressee_id: addresseeA, status: 'pending' }])
         .select()
-        .single();
+        .maybeSingle();
 
       if (error || !data) throw error || new Error('Failed to send friend request.');
 
@@ -1569,7 +1805,7 @@ export const db = {
         .update({ status, updated_at: new Date().toISOString() })
         .eq('id', friendshipId)
         .select()
-        .single();
+        .maybeSingle();
       if (error || !data) throw error || new Error('Failed to update friend request.');
       return data as Friendship;
     } catch (err: any) {
@@ -1715,17 +1951,14 @@ export const db = {
 
   getSettings: async (userId: string): Promise<Settings> => {
     assertSupabase();
-    try {
-      const { data, error } = await supabase
-        .from('settings')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-      if (error) throw error;
-      return data as Settings;
-    } catch (err: any) {
-      console.warn('[db.getSettings] Failed to read settings, returning defaults:', err.message || err);
-      // Return sensible defaults when schema is out-of-sync (missing columns)
+    const { data, error } = await supabase
+      .from('settings')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[db.getSettings] Failed to read settings, returning defaults:', error.message || error);
       return {
         id: '',
         user_id: userId,
@@ -1737,6 +1970,17 @@ export const db = {
         allow_dms: true
       } as Settings;
     }
+
+    return (data as Settings) || {
+      id: '',
+      user_id: userId,
+      push_notifications: true,
+      email_notifications: true,
+      public_profile: true,
+      dark_mode: true,
+      show_email: false,
+      allow_dms: true
+    };
   },
   updateSettings: async (userId: string, updates: Partial<Settings>): Promise<Settings> => {
     assertSupabase();
@@ -1746,9 +1990,20 @@ export const db = {
         .update({ ...updates, updated_at: new Date().toISOString() })
         .eq('user_id', userId)
         .select()
-        .single();
-      if (error || !data) throw error || new Error('Failed to update settings');
-      return data as Settings;
+        .maybeSingle();
+
+      if (error) throw error;
+      if (data) return data as Settings;
+
+      // If no settings row existed yet, create one with the requested fields.
+      const { data: insertedData, error: insertError } = await supabase
+        .from('settings')
+        .insert({ user_id: userId, ...updates, updated_at: new Date().toISOString() })
+        .select()
+        .maybeSingle();
+
+      if (insertError || !insertedData) throw insertError || new Error('Failed to create settings row');
+      return insertedData as Settings;
     } catch (err: any) {
       const msg = (err && err.message) || String(err);
       // If the error is caused by missing columns, attempt a fallback update without those fields
@@ -1758,14 +2013,28 @@ export const db = {
         delete safeUpdates.anonymous_mode;
         delete safeUpdates.allow_dms;
         delete safeUpdates.show_email;
+
         const { data: data2, error: error2 } = await supabase
           .from('settings')
           .update({ ...safeUpdates, updated_at: new Date().toISOString() })
           .eq('user_id', userId)
           .select()
-          .single();
-        if (error2 || !data2) throw error2 || new Error('Failed to update settings (fallback)');
-        return data2 as Settings;
+          .maybeSingle();
+
+        if (error2) {
+          throw error2 || new Error('Failed to update settings (fallback)');
+        }
+
+        if (data2) return data2 as Settings;
+
+        const { data: insertedData2, error: insertError2 } = await supabase
+          .from('settings')
+          .insert({ user_id: userId, ...safeUpdates, updated_at: new Date().toISOString() })
+          .select()
+          .maybeSingle();
+
+        if (insertError2 || !insertedData2) throw insertError2 || new Error('Failed to create settings row (fallback)');
+        return insertedData2 as Settings;
       }
       throw err;
     }
@@ -1879,7 +2148,7 @@ export const db = {
       .from('chats')
       .insert([{ tournament_id: tournamentId, user_id: userId, username, avatar_url: avatarUrl, content }])
       .select()
-      .single();
+      .maybeSingle();
     if (error || !data) throw error || new Error('Failed to send chat message');
     return data as ChatMessage;
   },
