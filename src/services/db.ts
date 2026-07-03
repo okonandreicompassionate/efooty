@@ -1363,14 +1363,15 @@ export const db = {
     return match as Match;
   },
 
-  createFriendChallenge: async (hostId: string, opponentName: string, gameId: string, title: string): Promise<FriendChallenge> => {
+  createFriendChallenge: async (hostId: string, opponentId: string, opponentName: string, gameId: string, title: string): Promise<FriendChallenge> => {
     assertSupabase();
     if (!isUuid(hostId)) throw new Error('Host id must be a valid UUID.');
+    if (!isUuid(opponentId)) throw new Error('Opponent id must be a valid UUID.');
     if (!isUuid(gameId)) throw new Error('Game id must be a valid UUID.');
 
     const { data, error } = await supabase
       .from('friend_challenges')
-      .insert([{ host_id: hostId, opponent_name: opponentName, game_id: gameId, title: title || 'Friendly challenge', status: 'pending', integrity_status: 'pending' }])
+      .insert([{ host_id: hostId, opponent_id: opponentId, opponent_name: opponentName, game_id: gameId, title: title || 'Friendly challenge', status: 'pending', integrity_status: 'pending' }])
       .select()
       .single();
 
@@ -1452,67 +1453,115 @@ export const db = {
 
   getFriendships: async (userId: string): Promise<Friendship[]> => {
     assertSupabase();
-    const { data, error } = await supabase
-      .from('friendships')
-      .select('*')
-      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
-      .order('updated_at', { ascending: false });
-    if (error) throw error;
-    return data as Friendship[];
+    try {
+      const { data, error } = await supabase
+        .from('friendships')
+        .select('*')
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+        .order('updated_at', { ascending: false });
+      if (error) throw error;
+      return data as Friendship[];
+    } catch (err: any) {
+      const msg = (err && err.message) || String(err);
+      if (/friendships/.test(msg) && /(does not exist|Could not find the table|schema cache)/i.test(msg)) {
+        console.warn('[db.getFriendships] Friendships table missing, returning empty list:', msg);
+        return [];
+      }
+      throw err;
+    }
   },
 
   sendFriendRequest: async (requesterId: string, addresseeId: string): Promise<Friendship> => {
     assertSupabase();
     if (requesterId === addresseeId) throw new Error('You cannot add yourself as a friend.');
 
-    const requesterA = requesterId < addresseeId ? requesterId : addresseeId;
-    const addresseeA = requesterId < addresseeId ? addresseeId : requesterId;
+    // Use the authenticated Supabase user as one side of the friendship to satisfy RLS
+    const authUser = await getSupabaseAuthUser();
+    if (!authUser?.id) throw new Error('No authenticated user available for sending friend request. Please sign in.');
 
-    const { data: existing, error: existingError } = await supabase
-      .from('friendships')
-      .select('*')
-      .eq('requester_id', requesterA)
-      .eq('addressee_id', addresseeA)
-      .maybeSingle();
+    const userA = authUser.id;
+    const otherId = addresseeId === userA ? requesterId : addresseeId;
 
-    if (existingError) throw existingError;
-    if (existing) return existing as Friendship;
+    const requesterA = userA < otherId ? userA : otherId;
+    const addresseeA = userA < otherId ? otherId : userA;
 
-    const { data, error } = await supabase
-      .from('friendships')
-      .insert([{ requester_id: requesterA, addressee_id: addresseeA, status: 'pending' }])
-      .select()
-      .single();
+    try {
+      const { data: existing, error: existingError } = await supabase
+        .from('friendships')
+        .select('*')
+        .eq('requester_id', requesterA)
+        .eq('addressee_id', addresseeA)
+        .maybeSingle();
 
-    if (error || !data) throw error || new Error('Failed to send friend request.');
+      if (existingError) throw existingError;
+      if (existing) return existing as Friendship;
+    } catch (err: any) {
+      const msg = (err && err.message) || String(err);
+      if (/friendships/.test(msg) && /(does not exist|Could not find the table|schema cache)/i.test(msg)) {
+        throw new Error('Friendships table is missing in the database. Run the migrations to create it.');
+      }
+      throw err;
+    }
 
-    await supabase.from('notifications').insert({
-      user_id: addresseeId,
-      title: 'New friend request',
-      content: 'A player wants to add you as a friend.',
-      link: '/friends',
-      is_read: false
-    });
+    try {
+      const { data, error } = await supabase
+        .from('friendships')
+        .insert([{ requester_id: requesterA, addressee_id: addresseeA, status: 'pending' }])
+        .select()
+        .single();
 
-    return data as Friendship;
+      if (error || !data) throw error || new Error('Failed to send friend request.');
+
+      await supabase.from('notifications').insert({
+        user_id: otherId,
+        title: 'New friend request',
+        content: 'A player wants to add you as a friend.',
+        link: '/friends',
+        is_read: false
+      });
+
+      return data as Friendship;
+    } catch (err: any) {
+      const msg = (err && err.message) || String(err);
+      if (/friendships/.test(msg) && /(does not exist|Could not find the table|schema cache)/i.test(msg)) {
+        throw new Error('Friendships table is missing in the database. Run the migrations to create it.');
+      }
+      throw err;
+    }
   },
 
   updateFriendshipStatus: async (friendshipId: string, status: Friendship['status']): Promise<Friendship> => {
     assertSupabase();
-    const { data, error } = await supabase
-      .from('friendships')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', friendshipId)
-      .select()
-      .single();
-    if (error || !data) throw error || new Error('Failed to update friend request.');
-    return data as Friendship;
+    try {
+      const { data, error } = await supabase
+        .from('friendships')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', friendshipId)
+        .select()
+        .single();
+      if (error || !data) throw error || new Error('Failed to update friend request.');
+      return data as Friendship;
+    } catch (err: any) {
+      const msg = (err && err.message) || String(err);
+      if (/friendships/.test(msg) && /(does not exist|Could not find the table|schema cache)/i.test(msg)) {
+        throw new Error('Friendships table is missing in the database. Run the migrations to create it.');
+      }
+      throw err;
+    }
   },
 
   removeFriendship: async (friendshipId: string): Promise<void> => {
     assertSupabase();
-    const { error } = await supabase.from('friendships').delete().eq('id', friendshipId);
-    if (error) throw error;
+    try {
+      const { error } = await supabase.from('friendships').delete().eq('id', friendshipId);
+      if (error) throw error;
+    } catch (err: any) {
+      const msg = (err && err.message) || String(err);
+      if (/friendships/.test(msg) && /(does not exist|Could not find the table|schema cache)/i.test(msg)) {
+        throw new Error('Friendships table is missing in the database. Run the migrations to create it.');
+      }
+      throw err;
+    }
   },
 
   getLeaderboard: async (gameId: string): Promise<Leaderboard[]> => {
@@ -1635,25 +1684,60 @@ export const db = {
 
   getSettings: async (userId: string): Promise<Settings> => {
     assertSupabase();
-    const { data, error } = await supabase
-      .from('settings')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-    if (error) throw error;
-    return data as Settings;
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      if (error) throw error;
+      return data as Settings;
+    } catch (err: any) {
+      console.warn('[db.getSettings] Failed to read settings, returning defaults:', err.message || err);
+      // Return sensible defaults when schema is out-of-sync (missing columns)
+      return {
+        id: '',
+        user_id: userId,
+        push_notifications: true,
+        email_notifications: true,
+        public_profile: true,
+        dark_mode: true,
+        show_email: false,
+        allow_dms: true
+      } as Settings;
+    }
   },
-
   updateSettings: async (userId: string, updates: Partial<Settings>): Promise<Settings> => {
     assertSupabase();
-    const { data, error } = await supabase
-      .from('settings')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('user_id', userId)
-      .select()
-      .single();
-    if (error || !data) throw error || new Error('Failed to update settings');
-    return data as Settings;
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .select()
+        .single();
+      if (error || !data) throw error || new Error('Failed to update settings');
+      return data as Settings;
+    } catch (err: any) {
+      const msg = (err && err.message) || String(err);
+      // If the error is caused by missing columns, attempt a fallback update without those fields
+      if (/column\s+"anonymous_mode"\s+does not exist/i.test(msg) || /column\s+"allow_dms"\s+does not exist/i.test(msg) || /column\s+"show_email"\s+does not exist/i.test(msg)) {
+        console.warn('[db.updateSettings] Schema missing some columns, retrying without unknown fields:', msg);
+        const safeUpdates: any = { ...updates };
+        delete safeUpdates.anonymous_mode;
+        delete safeUpdates.allow_dms;
+        delete safeUpdates.show_email;
+        const { data: data2, error: error2 } = await supabase
+          .from('settings')
+          .update({ ...safeUpdates, updated_at: new Date().toISOString() })
+          .eq('user_id', userId)
+          .select()
+          .single();
+        if (error2 || !data2) throw error2 || new Error('Failed to update settings (fallback)');
+        return data2 as Settings;
+      }
+      throw err;
+    }
   },
 
   getActivityLogs: async (userId: string): Promise<ActivityLog[]> => {
@@ -1678,6 +1762,57 @@ export const db = {
     return data as ChatMessage[];
   },
 
+  getReactionsForChannel: async (channelId: string, messageIds?: string[]): Promise<Record<string, Record<string, { count: number; byUser: string[] }>>> => {
+    assertSupabase();
+    let query = supabase.from('chat_reactions').select('message_id, emoji, user_id');
+    if (messageIds && messageIds.length > 0) query = query.in('message_id', messageIds);
+    const { data, error } = await query;
+    if (error) throw error;
+    const result: Record<string, Record<string, { count: number; byUser: string[] }>> = {};
+    for (const row of (data || []) as any[]) {
+      const mid = row.message_id;
+      const emoji = row.emoji;
+      if (!result[mid]) result[mid] = {};
+      if (!result[mid][emoji]) result[mid][emoji] = { count: 0, byUser: [] };
+      result[mid][emoji].count += 1;
+      result[mid][emoji].byUser.push(row.user_id);
+    }
+    return result;
+  },
+
+  toggleChatReaction: async (messageId: string, userId: string, emoji: string): Promise<void> => {
+    assertSupabase();
+    // Check if exists
+    const { data: existing, error: existingError } = await supabase
+      .from('chat_reactions')
+      .select('*')
+      .eq('message_id', messageId)
+      .eq('user_id', userId)
+      .eq('emoji', emoji)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (existing) {
+      const { error } = await supabase.from('chat_reactions').delete().eq('id', existing.id);
+      if (error) throw error;
+      return;
+    }
+    const { error } = await supabase.from('chat_reactions').insert([{ message_id: messageId, user_id: userId, emoji }]);
+    if (error) throw error;
+  },
+
+  setTyping: async (channelId: string, userId: string): Promise<void> => {
+    assertSupabase();
+    await supabase.from('chat_typing').upsert({ channel_id: channelId, user_id: userId, last_typing_at: new Date().toISOString() }, { onConflict: 'channel_id,user_id' });
+  },
+
+  getTypingUsers: async (channelId: string): Promise<string[]> => {
+    assertSupabase();
+    const cutoff = new Date(Date.now() - 8000).toISOString();
+    const { data, error } = await supabase.from('chat_typing').select('user_id').eq('channel_id', channelId).gte('last_typing_at', cutoff);
+    if (error) throw error;
+    return (data || []).map((r: any) => r.user_id) as string[];
+  },
+
   sendChatMessage: async (tournamentId: string, userId: string, username: string, avatarUrl: string, content: string): Promise<ChatMessage> => {
     assertSupabase();
 
@@ -1688,14 +1823,22 @@ export const db = {
       }
 
       const recipientId = dmParticipants.find(id => id !== userId)!;
-      const { data: recipientSettings, error: settingsError } = await supabase
-        .from('settings')
-        .select('allow_dms')
-        .eq('user_id', recipientId)
-        .maybeSingle();
+      let canDm = true;
+      try {
+        const { data: recipientSettings, error: settingsError } = await supabase
+          .from('settings')
+          .select('allow_dms')
+          .eq('user_id', recipientId)
+          .maybeSingle();
 
-      if (settingsError) throw settingsError;
-      const canDm = recipientSettings?.allow_dms !== false || await usersAreFriends(userId, recipientId);
+        if (settingsError) throw settingsError;
+        canDm = recipientSettings?.allow_dms !== false || await usersAreFriends(userId, recipientId);
+      } catch (err) {
+        console.warn('[db.sendChatMessage] Failed to read recipient settings, assuming DMs allowed:', err);
+        // If the settings schema is out-of-sync (missing column), don't block DMs — assume allowed.
+        canDm = true;
+      }
+
       if (!canDm) {
         throw new Error('This player only accepts DMs from friends.');
       }
@@ -1719,6 +1862,12 @@ export const db = {
         user_id: userId,
         last_read_at: new Date().toISOString()
       }, { onConflict: 'channel_id,user_id' });
+  },
+
+  deleteChatMessage: async (messageId: string): Promise<void> => {
+    assertSupabase();
+    const { error } = await supabase.from('chats').delete().eq('id', messageId);
+    if (error) throw error;
   },
 
   getUnreadDmCount: async (userId: string): Promise<number> => {

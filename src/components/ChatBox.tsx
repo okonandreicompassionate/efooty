@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Send, MessageSquare, Search, Shield, Award, ImagePlus, Paperclip, Sparkles, Camera, CheckCheck } from 'lucide-react';
+import { Reply, Eye, Video } from 'lucide-react';
 import { ChatMessage, Profile } from '../types';
 import { db } from '../services/db';
 import { supabase, isSupabaseConfigured } from '../supabase';
@@ -25,6 +26,11 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
   const [recipientSearch, setRecipientSearch] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null);
+  const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [viewOnce, setViewOnce] = useState(false);
+  const [reactionsMap, setReactionsMap] = useState<Record<string, Record<string, { count: number; byUser: string[] }>>>({});
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -77,8 +83,36 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
       if (!quiet) setLoading(true);
       const data = await db.getChatMessages(activeChannelId);
       setMessages(data);
+      // load reactions for the channel
+      try {
+        const ids = (data || []).map((m: any) => m.id);
+        const r = await db.getReactionsForChannel(activeChannelId, ids);
+        setReactionsMap(r);
+      } catch (e) {
+        console.warn('Failed to load reactions:', e);
+      }
+
+      // Auto-delete ephemeral (view-once) messages for DM recipients after loading.
       if (activeChannelId.startsWith('dm:')) {
         await db.markChatRead(activeChannelId, currentUser.id);
+        for (const msg of data || []) {
+          try {
+            const payload = JSON.parse(msg.content || '{}');
+            if (payload?.ephemeral && msg.user_id !== currentUser.id) {
+              // Delete on server so it can't be viewed again.
+              db.deleteChatMessage(msg.id).catch((e) => console.warn('Failed to delete ephemeral message:', e));
+            }
+          } catch (e) {
+            // ignore parse errors
+          }
+        }
+      }
+      // load typing users
+      try {
+        const t = await db.getTypingUsers(activeChannelId);
+        setTypingUsers(t.filter(id => id !== currentUser.id));
+      } catch (e) {
+        // ignore
       }
     } catch (err) {
       console.error('Failed to load chat messages:', err);
@@ -94,7 +128,10 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
     const interval = setInterval(() => {
       loadMessages(true);
     }, 3000);
-    return () => clearInterval(interval);
+    const typingInterval = setInterval(() => {
+      db.getTypingUsers(activeChannelId).then(t => setTypingUsers(t.filter(id => id !== currentUser.id))).catch(() => {});
+    }, 2000);
+    return () => { clearInterval(interval); clearInterval(typingInterval); };
   }, [activeChannelId, tournamentId]);
 
   useEffect(() => {
@@ -130,14 +167,19 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
     setInputText('');
 
     try {
-      let payload: string;
+      let payloadObj: any = {};
       if (selectedFile) {
         setIsUploadingMedia(true);
-        const imageUrl = await uploadChatMedia(selectedFile);
-        payload = JSON.stringify({ type: 'image', url: imageUrl, caption: textContent });
+        const mediaUrl = await uploadChatMedia(selectedFile);
+        payloadObj = { type: mediaType === 'video' ? 'video' : 'image', url: mediaUrl, caption: textContent };
       } else {
-        payload = JSON.stringify({ type: 'text', text: textContent });
+        payloadObj = { type: 'text', text: textContent };
       }
+
+      if (replyTo) payloadObj.reply_to = replyTo.id;
+      if (viewOnce) payloadObj.ephemeral = true;
+
+      const payload = JSON.stringify(payloadObj);
 
       const sent = await db.sendChatMessage(
         activeChannelId,
@@ -149,6 +191,9 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
       setMessages(prev => [...prev, sent]);
       setSelectedFile(null);
       setAttachmentPreview(null);
+      setMediaType(null);
+      setReplyTo(null);
+      setViewOnce(false);
     } catch (err) {
       console.error('Failed to send message:', err);
       alert(err instanceof Error ? err.message : 'Failed to send message.');
@@ -163,22 +208,72 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
     if (!file) return;
     setSelectedFile(file);
     setAttachmentPreview(URL.createObjectURL(file));
+    if (file.type.startsWith('video/')) setMediaType('video');
+    else setMediaType('image');
     event.target.value = '';
+  };
+
+  // Typing indicator: ping the server when input changes
+  useEffect(() => {
+    if (!activeChannelId) return;
+    if (!inputText) return;
+    const t = setTimeout(() => {
+      db.setTyping(activeChannelId, currentUser.id).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [inputText, activeChannelId]);
+
+  const handleToggleReaction = async (messageId: string, emoji: string) => {
+    try {
+      await db.toggleChatReaction(messageId, currentUser.id, emoji);
+      const ids = messages.map(m => m.id);
+      const r = await db.getReactionsForChannel(activeChannelId, ids);
+      setReactionsMap(r);
+    } catch (e) {
+      console.warn('Failed to toggle reaction:', e);
+    }
   };
 
   const renderMessageContent = (content: string) => {
     try {
       const payload = JSON.parse(content);
+      const replyPreview = payload?.reply_to ? messages.find(m => m.id === payload.reply_to) : null;
+      const renderReply = replyPreview ? (
+        <div className="mb-2 rounded-lg border border-white/5 bg-black/20 p-2 text-[11px] text-zinc-300">
+          <strong className="text-[10px] text-zinc-200">Reply to {replyPreview.username}:</strong>
+          <div className="truncate text-[11px] text-zinc-300">{JSON.parse(replyPreview.content || '""')?.text || replyPreview.content}</div>
+        </div>
+      ) : null;
       if (payload?.type === 'image' && payload.url) {
         return (
           <div className="space-y-2">
+            {renderReply}
             <img src={payload.url} alt={payload.caption || 'Shared photo'} className="max-h-56 rounded-xl border border-white/10 object-cover" />
             {payload.caption ? <p className="text-[11px] text-zinc-200">{payload.caption}</p> : null}
           </div>
         );
       }
+      if (payload?.type === 'video' && payload.url) {
+        return (
+          <div className="space-y-2">
+            {renderReply}
+            <video src={payload.url} controls className="max-h-72 rounded-xl border border-white/10 object-cover" />
+            {payload.caption ? <p className="text-[11px] text-zinc-200">{payload.caption}</p> : null}
+          </div>
+        );
+      }
       if (payload?.type === 'text' && typeof payload.text === 'string') {
-        return <span className="whitespace-pre-wrap">{payload.text}</span>;
+        return (
+          <div>
+            {replyPreview ? (
+              <div className="mb-2 rounded-lg border border-white/5 bg-black/20 p-2 text-[11px] text-zinc-300">
+                <strong className="text-[10px] text-zinc-200">Reply to {replyPreview.username}:</strong>
+                <div className="truncate text-[11px] text-zinc-300">{JSON.parse(replyPreview.content || '""')?.text || replyPreview.content}</div>
+              </div>
+            ) : null}
+            <span className="whitespace-pre-wrap">{payload.text}</span>
+          </div>
+        );
       }
     } catch {
       // Fall back to plain text.
@@ -311,6 +406,32 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
                   }`}>
                     {renderMessageContent(msg.content)}
                   </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <button type="button" onClick={() => setReplyTo(msg)} className="text-[10px] text-zinc-400 hover:text-cyan-300">Reply</button>
+                    {!isMe ? (
+                      <button type="button" onClick={() => setViewOnce(true)} className="text-[10px] text-zinc-400 hover:text-cyan-300">View once</button>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-1">
+                    {/* Existing reactions */}
+                    {Object.entries(reactionsMap[msg.id] || {}).map(([emoji, info]) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => handleToggleReaction(msg.id, emoji)}
+                        className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] ${info.byUser.includes(currentUser.id) ? 'bg-cyan-600/20 text-cyan-200' : 'bg-white/5 text-zinc-300'}`}
+                      >
+                        <span>{emoji}</span>
+                        <span className="text-[10px]">{info.count}</span>
+                      </button>
+                    ))}
+
+                    {/* Quick add reactions */}
+                    {['👍','❤️','🔥','😂','🎉'].map(e => (
+                      <button key={e} type="button" onClick={() => handleToggleReaction(msg.id, e)} className="text-[13px] text-zinc-400 hover:text-cyan-300">{e}</button>
+                    ))}
+                  </div>
                   {isMe ? (
                     <div className="flex items-center justify-end gap-1 text-[9px] text-zinc-500">
                       <CheckCheck className="h-3 w-3" /> Sent
@@ -337,6 +458,24 @@ export default function ChatBox({ currentUser, tournamentId, title = "Arena Chat
           ))}
         </div>
 
+        {replyTo ? (
+          <div className="mb-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-black/30 p-2">
+            <div className="min-w-0 flex-1 text-[11px] text-zinc-300">
+              Replying to <strong className="text-zinc-100">{replyTo.username}</strong>: {JSON.parse(replyTo.content || '""')?.text || replyTo.content}
+            </div>
+            <button type="button" onClick={() => setReplyTo(null)} className="text-[10px] font-semibold text-cyan-300">Cancel</button>
+          </div>
+        ) : null}
+
+        <div className="mb-2 flex items-center gap-2">
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="flex h-8 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 text-xs text-zinc-300">
+            <Paperclip className="h-4 w-4" /> Attach
+          </button>
+          <label className="flex items-center gap-2 text-xs text-zinc-300">
+            <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleFileChange} />
+            <input type="checkbox" checked={viewOnce} onChange={() => setViewOnce(v => !v)} /> <span>View once</span>
+          </label>
+        </div>
         {attachmentPreview ? (
           <div className="mb-2 flex items-center gap-2 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-2">
             <img src={attachmentPreview} alt="Preview" className="h-10 w-10 rounded-xl object-cover" />

@@ -27,17 +27,8 @@ export default function DashboardView({
   const [userAchievements, setUserAchievements] = useState<string[]>([]);
   const [friendChallenges, setFriendChallenges] = useState<FriendChallenge[]>([]);
   const [myRegistrations, setMyRegistrations] = useState<TournamentPlayer[]>([]);
-  const [challengeOpponent, setChallengeOpponent] = useState('');
-  const [challengeTitle, setChallengeTitle] = useState('Friendly showdown');
-  const [challengeGame, setChallengeGame] = useState(games[0]?.id || '');
   const [challengeMessage, setChallengeMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if ((!challengeGame || !games.some(game => game.id === challengeGame)) && games.length > 0) {
-      setChallengeGame(games[0].id);
-    }
-  }, [games, challengeGame]);
 
   useEffect(() => {
     async function loadData() {
@@ -63,21 +54,6 @@ export default function DashboardView({
     loadData();
   }, [currentUser.id]);
 
-  const handleCreateChallenge = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!challengeOpponent.trim()) return;
-    try {
-      const created = await db.createFriendChallenge(currentUser.id, challengeOpponent.trim(), challengeGame, challengeTitle.trim() || 'Friendly showdown');
-      setFriendChallenges(prev => [created, ...prev]);
-      setChallengeMessage(`Challenge sent to ${challengeOpponent.trim()}.`);
-      setChallengeOpponent('');
-      setChallengeTitle('Friendly showdown');
-    } catch (err) {
-      console.error('Failed to create challenge', err);
-      setChallengeMessage('Unable to create the challenge right now.');
-    }
-  };
-
   const handleAcceptChallenge = async (challengeId: string) => {
     try {
       const accepted = await db.acceptFriendChallenge(challengeId, currentUser.id);
@@ -102,6 +78,13 @@ export default function DashboardView({
   const totalWon = stats.reduce((acc, s) => acc + s.matches_won, 0);
   const totalLost = stats.reduce((acc, s) => acc + s.matches_lost, 0);
   const winRate = totalPlayed > 0 ? Math.round((totalWon / totalPlayed) * 100) : 0;
+
+  const achievementsPreview = [
+    { id: 'ac1', name: 'First Victory', icon: 'Award', color: 'bg-cyan-500/10 text-cyan-400' },
+    { id: 'ac2', name: 'Flawless Win', icon: 'Zap', color: 'bg-yellow-500/10 text-yellow-400' },
+    { id: 'ac3', name: 'Champion Ascent', icon: 'Trophy', color: 'bg-purple-500/10 text-purple-400' },
+    { id: 'ac4', name: 'Tournament Spree', icon: 'Flame', color: 'bg-red-500/10 text-red-400' }
+  ];
 
   // Render Skeleton Loader if loading
   if (loading) {
@@ -261,40 +244,30 @@ export default function DashboardView({
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-white">Friendly Challenge Hub</h2>
-                <p className="text-xs text-zinc-500">Create quick friend-play matches, track them, and build points without a full bracket.</p>
+                <p className="text-xs text-zinc-500">Use the dedicated friendly match page to search players and send verified invites only to registered profiles.</p>
               </div>
               <div className="rounded-full bg-cyan-500/10 p-2 text-cyan-400">
                 <Swords className="h-4 w-4" />
               </div>
             </div>
 
-            <form onSubmit={handleCreateChallenge} className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_auto]">
-              <input
-                value={challengeOpponent}
-                onChange={(e) => setChallengeOpponent(e.target.value)}
-                placeholder="Opponent name"
-                className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-zinc-500"
-              />
-              <input
-                value={challengeTitle}
-                onChange={(e) => setChallengeTitle(e.target.value)}
-                placeholder="Friendly showdown"
-                className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-zinc-500"
-              />
-              <select value={challengeGame} onChange={(e) => setChallengeGame(e.target.value)} className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white">
-                {games.length === 0 ? (
-                  <option value="" disabled>Loading games...</option>
-                ) : (
-                  games.map(game => <option key={game.id} value={game.id}>{game.name}</option>)
-                )}
-              </select>
-              <div className="md:col-span-3 flex items-center justify-between gap-3">
-                <span className="text-[11px] text-zinc-500">Verified wins award rank points and show up in your challenge history.</span>
-                <button type="submit" className="rounded-xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-black">Create challenge</button>
+            <div className="grid gap-3 md:grid-cols-[1.2fr_auto]">
+              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-zinc-300">
+                <p className="font-semibold text-white">Search by username or email</p>
+                <p className="mt-2 text-xs text-zinc-500">Friendly matches are now tied to real KickOff users from the database. No more free-text opponent names.</p>
               </div>
-            </form>
+              <button
+                type="button"
+                onClick={() => setActiveTab('friendly')}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-black transition hover:bg-cyan-400"
+              >
+                Open Friendly Page
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
 
             {challengeMessage && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200">{challengeMessage}</div>}
+          </div>
 
             <div className="space-y-2">
               {friendChallenges.length === 0 ? (
@@ -313,7 +286,6 @@ export default function DashboardView({
                 ))
               )}
             </div>
-          </div>
 
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -448,12 +420,7 @@ export default function DashboardView({
               Achievements
             </h2>
             <div className="grid grid-cols-4 gap-2">
-              {db.getAchievements().then(achList => {} /* just referencing the list */) && [
-                { id: 'ac1', name: 'First Victory', icon: 'Award', color: 'bg-cyan-500/10 text-cyan-400' },
-                { id: 'ac2', name: 'Flawless Win', icon: 'Zap', color: 'bg-yellow-500/10 text-yellow-400' },
-                { id: 'ac3', name: 'Champion Ascent', icon: 'Trophy', color: 'bg-purple-500/10 text-purple-400' },
-                { id: 'ac4', name: 'Tournament Spree', icon: 'Flame', color: 'bg-red-500/10 text-red-400' }
-              ].map(ach => {
+              {achievementsPreview.map(ach => {
                 const isEarned = userAchievements.includes(ach.id);
                 return (
                   <div 

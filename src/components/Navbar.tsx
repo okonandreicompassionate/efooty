@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Trophy, Bell, Shield, LogOut, Check, ChevronDown, Menu, X, MessageSquare, Users } from 'lucide-react';
+import { Trophy, Bell, Shield, LogOut, Check, ChevronDown, Menu, X, MessageSquare, Users, Swords } from 'lucide-react';
 import { Profile, Notification } from '../types';
 import { db } from '../services/db';
 import { supabase } from '../supabase';
@@ -52,6 +52,7 @@ export default function Navbar({
             {[
               { id: 'dashboard', name: 'Dashboard' },
               { id: 'tournaments', name: 'Tournaments' },
+              { id: 'friendly', name: 'Friendly' },
               { id: 'messages', name: 'DMs' },
               { id: 'friends', name: 'Friends' },
               { id: 'leaderboard', name: 'Leaderboard' },
@@ -70,6 +71,7 @@ export default function Navbar({
               >
                 {tab.id === 'messages' && <MessageSquare className="h-3.5 w-3.5" />}
                 {tab.id === 'friends' && <Users className="h-3.5 w-3.5" />}
+                {tab.id === 'friendly' && <Swords className="h-3.5 w-3.5" />}
                 <span>{tab.name}</span>
                 {tab.id === 'messages' && unreadDmCount > 0 && (
                   <span className="ml-0.5 rounded-full bg-cyan-500 px-1.5 py-0.5 text-[10px] font-extrabold text-black">
@@ -241,7 +243,7 @@ export default function Navbar({
         {showMobileMenu && (
           <div className="border-t border-white/5 bg-[#06070a] px-2 py-3 md:hidden">
             <div className="flex flex-col gap-2">
-              {[{ id: 'dashboard', name: 'Dashboard' }, { id: 'tournaments', name: 'Tournaments' }, { id: 'messages', name: 'DMs' }, { id: 'friends', name: 'Friends' }, { id: 'leaderboard', name: 'Leaderboard' }, { id: 'achievements', name: 'Achievements' }, { id: 'settings', name: 'Settings' }].map((tab) => (
+              {[{ id: 'dashboard', name: 'Dashboard' }, { id: 'tournaments', name: 'Tournaments' }, { id: 'friendly', name: 'Friendly' }, { id: 'messages', name: 'DMs' }, { id: 'friends', name: 'Friends' }, { id: 'leaderboard', name: 'Leaderboard' }, { id: 'achievements', name: 'Achievements' }, { id: 'settings', name: 'Settings' }].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => { setActiveTab(tab.id); setShowMobileMenu(false); }}

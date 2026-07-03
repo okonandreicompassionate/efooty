@@ -203,6 +203,14 @@ export interface ChatMessage {
   created_at: string;
 }
 
+export interface ChatReaction {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: string;
+}
+
 export interface ChatRead {
   id: string;
   channel_id: string;

@@ -17,6 +17,7 @@ import OrganizerView from './components/OrganizerView';
 import SettingsView from './components/SettingsView';
 import MessagesView from './components/MessagesView';
 import FriendsView from './components/FriendsView';
+import FriendlyMatchesView from './components/FriendlyMatchesView';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null);
@@ -487,6 +488,10 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"`}
 
         {activeTab === 'friends' && (
           <FriendsView currentUser={currentUser} profiles={profiles} setActiveTab={setActiveTab} />
+        )}
+
+        {activeTab === 'friendly' && (
+          <FriendlyMatchesView currentUser={currentUser} profiles={profiles} games={games} setActiveTab={setActiveTab} />
         )}
 
         {activeTab === 'organizer' && (
