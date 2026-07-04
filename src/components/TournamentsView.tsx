@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   Trophy, Search, Filter, Calendar, Users, Award, Shield, 
   ChevronRight, ArrowLeft, Gamepad2, PlusCircle, CheckCircle, 
-  HelpCircle, Eye, AlertCircle, Sparkles, Upload, MessageSquare, Coins
+  HelpCircle, Eye, AlertCircle, Sparkles, Upload, MessageSquare, Coins, UserPlus
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
@@ -88,6 +88,8 @@ export default function TournamentsView({
   const toast = useToast();
   const [rescheduleTime, setRescheduleTime] = useState<string>('');
   const [showEmbedCode, setShowEmbedCode] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
 
   const getSignupLink = (tournamentId: string) => {
     if (typeof window === 'undefined') return '';
@@ -327,6 +329,20 @@ export default function TournamentsView({
     });
   };
 
+  const handleInvitePlayer = async (inviteeId: string) => {
+    if (!selectedTournamentId || !activeTournament) return;
+    setInvitingUserId(inviteeId);
+    try {
+      await db.inviteToTournament(activeTournament.id, currentUser.id, inviteeId);
+      toast.show('Invite sent to the player.', 'success');
+    } catch (err: any) {
+      console.error('Invite failed:', err);
+      toast.show('Could not send the invite. Please try again.', 'error');
+    } finally {
+      setInvitingUserId(null);
+    }
+  };
+
   const handleRegister = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!selectedTournamentId) return;
@@ -508,6 +524,10 @@ export default function TournamentsView({
   const getGameName = (id: string) => games.find(g => g.id === id)?.name || 'Esports Match';
   const getDisplayName = (profile?: Profile) => profile?.username || 'Unknown Competitor';
   const getDisplayEmail = (profile?: Profile) => profile?.show_email ? profile.email : 'Hidden by privacy';
+  const inviteTargets = (activeTournament ? profiles.filter((profile) => {
+    if (profile.id === currentUser.id || profile.id === activeTournament.organizer_id) return false;
+    return !registrations.some((reg) => reg.player_id === profile.id);
+  }) : []);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -1043,6 +1063,16 @@ export default function TournamentsView({
                       {activeTournament.points_only && <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-300">Points-only rewards</span>}
                       {activeTournament.entry_fee && activeTournament.entry_fee > 0 ? <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-300">Entry fee: ${activeTournament.entry_fee}</span> : <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-300">Free to join</span>}
                     </div>
+                    {activeTournament.status === 'registration' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowInviteModal(true)}
+                        className="flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-300 transition-colors hover:bg-cyan-500/20"
+                      >
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Invite players
+                      </button>
+                    )}
                   </div>
 
                   <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-5 space-y-4">
@@ -1359,6 +1389,47 @@ export default function TournamentsView({
 
           </div>
 
+        </div>
+      )}
+
+      {showInviteModal && activeTournament && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#0e1218]/95 p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.25em] text-cyan-400">Invite players</p>
+                <h3 className="text-lg font-semibold text-white">{activeTournament.title}</h3>
+                <p className="mt-1 text-sm text-zinc-400">Send an in-app invite so they can jump straight into registration.</p>
+              </div>
+              <button onClick={() => setShowInviteModal(false)} className="text-sm text-zinc-500">✕</button>
+            </div>
+
+            <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+              {inviteTargets.length === 0 ? (
+                <p className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-zinc-400">No eligible players are available to invite right now.</p>
+              ) : (
+                inviteTargets.map((profile) => (
+                  <div key={profile.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3">
+                    <div className="flex items-center gap-3">
+                      <img src={profile.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${profile.username}`} alt="" className="h-9 w-9 rounded-lg bg-zinc-900 object-cover" />
+                      <div>
+                        <p className="text-sm font-semibold text-white">{profile.username}</p>
+                        <p className="text-[11px] text-zinc-500">{profile.role}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleInvitePlayer(profile.id)}
+                      disabled={invitingUserId === profile.id}
+                      className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-300 transition-colors hover:bg-cyan-500/20 disabled:opacity-50"
+                    >
+                      {invitingUserId === profile.id ? 'Sending...' : 'Invite'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
 

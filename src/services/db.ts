@@ -1746,18 +1746,15 @@ export const db = {
     }
     if (!authUser?.id) throw new Error('No authenticated user available for sending friend request. Please sign in.');
 
-    const userA = authUser.id;
-    const otherId = addresseeId === userA ? requesterId : addresseeId;
-
-    const requesterA = userA < otherId ? userA : otherId;
-    const addresseeA = userA < otherId ? otherId : userA;
+    const senderId = authUser.id;
+    const recipientId = addresseeId;
 
     try {
       const { data: existing, error: existingError } = await supabase
         .from('friendships')
         .select('*')
-        .eq('requester_id', requesterA)
-        .eq('addressee_id', addresseeA)
+        .eq('requester_id', senderId)
+        .eq('addressee_id', recipientId)
         .maybeSingle();
 
       if (existingError) throw existingError;
@@ -1773,19 +1770,23 @@ export const db = {
     try {
       const { data, error } = await supabase
         .from('friendships')
-        .insert([{ requester_id: requesterA, addressee_id: addresseeA, status: 'pending' }])
+        .insert([{ requester_id: senderId, addressee_id: recipientId, status: 'pending' }])
         .select()
         .maybeSingle();
 
       if (error || !data) throw error || new Error('Failed to send friend request.');
 
-      await supabase.from('notifications').insert({
-        user_id: otherId,
+      const { error: notificationError } = await supabase.from('notifications').insert({
+        user_id: recipientId,
         title: 'New friend request',
         content: 'A player wants to add you as a friend.',
         link: '/friends',
         is_read: false
       });
+
+      if (notificationError) {
+        console.warn('[db.sendFriendRequest] Failed to create notification, but the friend request was saved:', notificationError);
+      }
 
       return data as Friendship;
     } catch (err: any) {
@@ -1911,6 +1912,27 @@ export const db = {
       .eq('user_id', userId);
     if (error) throw error;
     return data as PlayerStatistics[];
+  },
+
+  inviteToTournament: async (tournamentId: string, inviterId: string, inviteeId: string): Promise<void> => {
+    assertSupabase();
+    const [{ data: tournament, error: tournamentError }, { data: inviterProfile, error: inviterProfileError }] = await Promise.all([
+      supabase.from('tournaments').select('title').eq('id', tournamentId).maybeSingle(),
+      supabase.from('profiles').select('username').eq('id', inviterId).maybeSingle()
+    ]);
+
+    if (tournamentError) throw tournamentError;
+    if (inviterProfileError) throw inviterProfileError;
+
+    const { error } = await supabase.from('notifications').insert({
+      user_id: inviteeId,
+      title: `Tournament invite${tournament?.title ? `: ${tournament.title}` : ''}`,
+      content: `${inviterProfile?.username || 'Someone'} invited you to join this tournament.`,
+      link: `/?tournament=${tournamentId}&invite=1`,
+      is_read: false
+    });
+
+    if (error) throw error;
   },
 
   getNotifications: async (userId: string): Promise<Notification[]> => {

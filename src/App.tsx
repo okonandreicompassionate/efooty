@@ -269,8 +269,7 @@ export default function App() {
   // FORCE SUPABASE CONFIGURATION IN LIVE MODE
   if (!isSupabaseConfigured) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-sky-50 to-slate-100 text-slate-900 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.12),transparent_22%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.10),transparent_24%)]" />
+      <div className="et-light min-h-screen bg-[#f7fbff] text-slate-900 flex items-center justify-center p-4 relative overflow-hidden font-sans">
 
         <div className="relative z-10 w-full max-w-lg space-y-6">
           <div className="text-center space-y-3">
@@ -335,8 +334,7 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"
   // RENDER LOGIN SCREEN
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-sky-50 to-white text-slate-950 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_20%),radial-gradient(circle_at_bottom_right,rgba(14,165,233,0.08),transparent_22%)]" />
+      <div className="et-light min-h-screen bg-[#f7fbff] text-slate-950 flex items-center justify-center p-4 relative overflow-hidden font-sans">
 
         <div className="relative z-10 w-full max-w-md space-y-6">
           <div className="text-center space-y-3">
@@ -410,7 +408,7 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"
                   <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <input 
                     type="password" 
-                    placeholder="••••••••" 
+                    placeholder="********" 
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-3xl pl-11 pr-4 py-3 text-sm text-slate-950 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
@@ -420,13 +418,13 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"
 
               {authError && (
                 <p className="text-sm text-red-600 font-semibold bg-red-50 border border-red-200 px-4 py-3 rounded-3xl">
-                  ⚠️ {authError}
+                  Error: {authError}
                 </p>
               )}
 
               <button 
                 type="submit"
-                className="w-full rounded-3xl bg-gradient-to-r from-cyan-500 to-sky-500 px-5 py-3 text-sm font-semibold uppercase tracking-[0.15em] text-slate-950 shadow-[0_8px_32px_rgba(56,189,248,0.18)] transition-transform hover:-translate-y-0.5"
+                className="w-full rounded-3xl bg-cyan-300 px-5 py-3 text-sm font-semibold uppercase tracking-[0.15em] text-slate-950 shadow-[0_8px_32px_rgba(56,189,248,0.18)] transition-transform hover:-translate-y-0.5"
               >
                 <div className="flex items-center justify-center gap-2">
                   <LogIn className="h-4 w-4" />
@@ -448,11 +446,7 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"
 
   // RENDER AUTHENTICATED PLATFORM MAIN DASHBOARD
   return (
-    <div className="min-h-screen bg-[#f8fbff] text-slate-950 flex flex-col font-sans pb-[calc(5.5rem+env(safe-area-inset-bottom))] relative overflow-x-hidden">
-      
-      {/* Immersive background blurs */}
-      <div className="absolute top-0 right-0 w-130 h-130 bg-cyan-200/70 blur-[140px] -z-10 rounded-full" />
-      <div className="absolute bottom-0 left-0 w-80 h-80 bg-sky-100/80 blur-[110px] -z-10 rounded-full" />
+    <div className="et-light min-h-screen bg-[#f7fbff] text-slate-950 flex flex-col font-sans pb-[calc(5.5rem+env(safe-area-inset-bottom))] relative overflow-x-hidden">
 
       {/* Dynamic Navbar */}
       <Navbar 
@@ -474,7 +468,7 @@ VITE_SUPABASE_ANON_KEY="your-anon-key"
       {/* Main page stage */}
       <main className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 w-full relative z-10">
         {appDataError && (
-          <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {appDataError}
           </div>
         )}

@@ -41,6 +41,10 @@ export default function Navbar({
     { id: 'achievements', name: 'Achievements' },
     { id: 'settings', name: 'Settings' }
   ];
+  const mobileNavItems = [
+    { id: 'notifications', name: 'Notifications' },
+    ...navItems
+  ];
 
   const getNavIcon = (id: string) => {
     switch (id) {
@@ -54,6 +58,8 @@ export default function Navbar({
         return MessageSquare;
       case 'friends':
         return Users;
+      case 'notifications':
+        return Bell;
       default:
         return Shield;
     }
@@ -67,6 +73,17 @@ export default function Navbar({
     onRefreshNotifications();
   };
 
+  const handleNotificationClick = (notification: Notification) => {
+    setShowNotifications(false);
+    if (notification.link) {
+      window.location.href = notification.link;
+      return;
+    }
+    if (!notification.is_read) {
+      void handleMarkRead(notification.id);
+    }
+  };
+
   const toast = useToast();
 
   return (
@@ -77,7 +94,7 @@ export default function Navbar({
           
           {/* Logo */}
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-            <div className="flex h-11 w-11 items-center justify-center rounded-3xl bg-gradient-to-br from-cyan-400 via-sky-300 to-indigo-500 text-slate-950 font-extrabold shadow-[0_20px_50px_rgba(56,189,248,0.18)]">
+            <div className="flex h-11 w-11 items-center justify-center rounded-3xl bg-linear-to-br from-cyan-400 via-sky-300 to-indigo-500 text-slate-950 font-extrabold shadow-[0_20px_50px_rgba(56,189,248,0.18)]">
               <Trophy className="h-5 w-5" />
             </div>
             <div className="space-y-0.5">
@@ -173,7 +190,9 @@ export default function Navbar({
             >
               {showMobileMenu ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               {attentionCount > 0 && (
-                <span className="absolute -top-1 -right-1 inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-white" />
+                <span className="absolute -top-1 -right-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-cyan-600 px-1 text-[10px] font-bold text-white ring-2 ring-white">
+                  {attentionCount > 9 ? '9+' : attentionCount}
+                </span>
               )}
             </button>
           </div>
@@ -212,7 +231,8 @@ export default function Navbar({
                       notifications.map((notification) => (
                         <div 
                           key={notification.id} 
-                          className={`p-2.5 rounded-lg text-xs transition-colors ${
+                          onClick={() => handleNotificationClick(notification)}
+                          className={`cursor-pointer p-2.5 rounded-lg text-xs transition-colors ${
                             notification.is_read ? 'bg-slate-100 text-slate-700' : 'bg-cyan-50 text-slate-900 border border-cyan-100'
                           }`}
                         >
@@ -220,7 +240,10 @@ export default function Navbar({
                             <span className="font-semibold text-slate-900">{notification.title}</span>
                             {!notification.is_read && (
                               <button 
-                                onClick={() => handleMarkRead(notification.id)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleMarkRead(notification.id);
+                                }}
                                 className="text-cyan-700 hover:text-cyan-600 transition-colors"
                                 title="Mark as read"
                               >
@@ -313,20 +336,37 @@ export default function Navbar({
         {showMobileMenu && (
           <div className="border-t border-slate-200 bg-white px-2 py-3 md:hidden">
             <div className="flex flex-col gap-2">
-              {navItems.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => { setActiveTab(tab.id); setShowMobileMenu(false); }}
-                  className={`min-h-11 rounded-lg px-3 py-2 text-left text-sm font-medium ${activeTab === tab.id ? 'bg-cyan-50 text-cyan-700' : 'text-gray-600 hover:bg-gray-50'}`}
-                >
-                  <span>{tab.name}</span>
-                  {tab.id === 'messages' && unreadDmCount > 0 && (
-                    <span className="float-right rounded-full bg-cyan-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
-                      {unreadDmCount > 9 ? '9+' : unreadDmCount}
+              {mobileNavItems.map((tab) => {
+                const Icon = getNavIcon(tab.id);
+                const isActive = activeTab === tab.id;
+                const showBadge = tab.id === 'notifications' ? unreadCount > 0 : tab.id === 'messages' ? unreadDmCount > 0 : false;
+                const badgeValue = tab.id === 'notifications' ? unreadCount : unreadDmCount;
+
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      if (tab.id === 'notifications') {
+                        setShowNotifications(prev => !prev);
+                      } else {
+                        setActiveTab(tab.id);
+                      }
+                      setShowMobileMenu(false);
+                    }}
+                    className={`flex min-h-11 items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-medium ${isActive ? 'bg-cyan-50 text-cyan-700' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon className="h-4 w-4" />
+                      <span>{tab.name}</span>
                     </span>
-                  )}
-                </button>
-              ))}
+                    {showBadge && (
+                      <span className="rounded-full bg-cyan-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                        {badgeValue > 9 ? '9+' : badgeValue}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
               {(currentUser.role === 'organizer' || currentUser.role === 'admin') && (
                 <button
                   onClick={() => { setActiveTab('organizer'); setShowMobileMenu(false); }}

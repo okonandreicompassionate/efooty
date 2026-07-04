@@ -574,6 +574,9 @@ create policy "Allow organizers/admins to manage match results" on public.match_
 create policy "Allow users to read their own notifications" on public.notifications
     for select using (auth.uid() = user_id);
 
+create policy "Allow authenticated users to create notifications" on public.notifications
+    for insert with check (auth.role() = 'authenticated' and auth.uid() is not null);
+
 create policy "Allow users to update their own notifications" on public.notifications
     for update using (auth.uid() = user_id);
 
@@ -616,8 +619,12 @@ create policy "Allow friendship participants to read" on public.friendships
 
 create policy "Allow users to create friendship requests" on public.friendships
     for insert with check (
-        auth.uid()::uuid IS NOT NULL and
-        (auth.uid()::uuid = requester_id or auth.uid()::uuid = addressee_id)
+        auth.role() = 'authenticated'
+        and auth.uid() is not null
+        and (
+            auth.uid()::text = requester_id::text
+            or auth.uid()::text = addressee_id::text
+        )
     );
 
 create policy "Allow friendship participants to update" on public.friendships
